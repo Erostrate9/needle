@@ -259,6 +259,8 @@ class NDArray:
             idx = new_shape.index(-1)
             new_shape[idx] = self.size // prod(new_shape[:idx]+new_shape[idx+1:])
         if prod(self._shape) != prod(new_shape):
+            print("self._shape",self._shape)
+            print("prod(new_shape)", prod(new_shape))
             raise ValueError("shape is not consistent")
         strides = tuple(prod(new_shape[i + 1:]) for i in range(len(new_shape)))
         return NDArray.make(
@@ -663,6 +665,19 @@ class NDArray:
         out[tuple(slice(padding[0], padding[0] + offset) for padding, offset in zip(axes, self.shape))] = self
         return out.compact()
         ### END YOUR SOLUTION
+
+    def split(self, axis=0):
+        assert isinstance(self, NDArray)
+        device = self.device
+        out_shape = list(self.shape)
+        n = out_shape.pop(axis)
+        out = list(NDArray.make(out_shape, device=device) for i in range(n))
+        axes = list(range(self.ndim))
+        axes.pop(axis)
+        axes.insert(0, axis)
+        A = self.compact().permute(axes)
+        device.split(A.compact()._handle, out[0].size, tuple(o._handle for o in out))
+        return tuple(out)
 
 
 def array(a, dtype="float32", device=None):

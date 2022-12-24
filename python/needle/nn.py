@@ -707,3 +707,44 @@ class Embedding(Module):
         # (seq_len, bs, num_embeddings) @ (num_embeddings, embedding_dim)
         return (one_hot @ self.weight).reshape((seq_len, bs, self.embedding_dim))
         ### END YOUR SOLUTION
+
+# class Softmax(Module):
+#     def forward(self, Z: Tensor):
+#         Z = ops.exp(Z - Z.max(axis=-1, keepdims=True))
+#         return Z / Z.sum(axis=-1, keepdims=True)
+
+class MultiheadAttention(Module):
+    def __init__(self,  mask, heads, W_KQV, W_out, device=None, dtype="float32"):
+        super().__init__()
+        self.mask = mask
+        self.heads = heads
+        self.W_KQV = W_KQV
+        self.W_out = W_out
+
+    def forward(self, X: Tensor) -> Tensor:
+        def get_tensors(ttuple, start, end):
+            res = []
+            for i in range(start, end):
+                if i >= len(ttuple):
+                    break
+                res.append(ttuple[i])
+            return ops.MakeTensorTuple()(*res)
+
+        B, T, d = X.shape
+        res = (X.reshape((B*T,d))@self.W_KQV).reshape((B, T, self.W_KQV.shape[-1]))
+
+        KQV = ops.split(res, len(X.shape)-1)
+        n = self.W_KQV.shape[-1]//3
+
+        K = ops.stack(get_tensors(KQV,0,n), len(X.shape) - 1).reshape((B, T, self.heads, d//self.heads)).transpose((1,2))
+        Q = ops.stack(get_tensors(KQV,n,n*2), len(X.shape) - 1).reshape((B, T, self.heads, d//self.heads)).transpose((1,2))
+        V = ops.stack(get_tensors(KQV,n*2,n*3), len(X.shape) - 1).reshape((B, T, self.heads, d//self.heads)).transpose((1,2))
+        # B x T x d =>
+        # B x heads x T x d/heads
+        # K@Q.T: B x heads x T x T
+        # mask: T x T
+        attn = ops.softmax(ops.batch_matmul(K, Q.transpose()) / ((d // self.heads)**0.5) + self.mask.broadcast_to((B, self.heads, T, T)))
+        attn_output = (ops.batch_matmul(attn, V).transpose((1,2)).reshape((B*T, d)) @ self.W_out).reshape((B, T, self.W_out.shape[-1]))
+        return attn_output, attn
+
+

@@ -302,55 +302,90 @@ class MatMul(TensorOp):
         ### END YOUR SOLUTION
 
     def gradient(self, out_grad, node):
-        ### BEGIN YOUR SOLUTION
         lhs, rhs = node.inputs
-        dshape = len(lhs.shape) - len(rhs.shape)
-        small, big = lhs, rhs
-        lhs_axes = ()
-        rhs_axes = ()
-        if (dshape > 0):
-            big = lhs
-            small = rhs
-        elif (dshape < 0):
-            big = rhs
-            small = lhs
-        # lhs.shape > rhs.shape
-        if (dshape != 0 and len(big.shape) > 2):
-            big_axes = ()
-            small_axes = []
-            for i in range(-3, -len(small.shape) - 1, -1):
-                if small.shape[i] != big.shape[i]:
-                    small_axes.insert(0, len(big.shape) + i)
-            small_axes = list(range(abs(dshape))) + small_axes
-            small_axes = tuple(small_axes)
-            if dshape > 0:
-                rhs_axes = small_axes
-            else:
-                lhs_axes = small_axes
-        elif dshape == 0 and len(lhs.shape) > 2:
-            # rhs.shape == lhs.shape
-            axes = []
-            for i in range(len(lhs.shape) - 2):
-                if lhs.shape[i] != rhs.shape[i]:
-                    axes.append(i)
-                    if lhs.shape[i] == 1:
-                        lhs_axes = axes
-                        rhs_axes = ()
-                    else:
-                        lhs_axes = ()
-                        rhs_axes = axes
-            lhs_axes = tuple(lhs_axes)
-            rhs_axes = tuple(rhs_axes)
-        lhs_grad = summation(out_grad @ rhs.transpose(), lhs_axes)
-        rhs_grad = summation(lhs.transpose() @ out_grad, rhs_axes)
-        lhs_grad = lhs_grad if lhs_grad.shape == lhs.shape else lhs_grad.reshape(lhs.shape)
-        rhs_grad = rhs_grad if rhs_grad.shape == rhs.shape else rhs_grad.reshape(rhs.shape)
-        return lhs_grad, rhs_grad
-        ### END YOUR SOLUTION
+        grad_a = out_grad @ transpose(rhs)
+        grad_b = transpose(lhs) @ out_grad
+        if grad_a.shape != lhs.shape:
+            grad_a = grad_a.sum(tuple(range(len(grad_a.shape)-len(lhs.shape))))
+        if grad_b.shape != rhs.shape:
+            grad_b = grad_b.sum(tuple(range(len(grad_b.shape)-len(rhs.shape))))
+        return grad_a, grad_b
+        # ### BEGIN YOUR SOLUTION
+        # lhs, rhs = node.inputs
+        # dshape = len(lhs.shape) - len(rhs.shape)
+        # small, big = lhs, rhs
+        # lhs_axes = ()
+        # rhs_axes = ()
+        # if (dshape > 0):
+        #     big = lhs
+        #     small = rhs
+        # elif (dshape < 0):
+        #     big = rhs
+        #     small = lhs
+        # # lhs.shape > rhs.shape
+        # if (dshape != 0 and len(big.shape) > 2):
+        #     big_axes = ()
+        #     small_axes = []
+        #     for i in range(-3, -len(small.shape) - 1, -1):
+        #         if small.shape[i] != big.shape[i]:
+        #             small_axes.insert(0, len(big.shape) + i)
+        #     small_axes = list(range(abs(dshape))) + small_axes
+        #     small_axes = tuple(small_axes)
+        #     if dshape > 0:
+        #         rhs_axes = small_axes
+        #     else:
+        #         lhs_axes = small_axes
+        # elif dshape == 0 and len(lhs.shape) > 2:
+        #     # rhs.shape == lhs.shape
+        #     axes = []
+        #     for i in range(len(lhs.shape) - 2):
+        #         if lhs.shape[i] != rhs.shape[i]:
+        #             axes.append(i)
+        #             if lhs.shape[i] == 1:
+        #                 lhs_axes = axes
+        #                 rhs_axes = ()
+        #             else:
+        #                 lhs_axes = ()
+        #                 rhs_axes = axes
+        #     lhs_axes = tuple(lhs_axes)
+        #     rhs_axes = tuple(rhs_axes)
+        # lhs_grad = summation(out_grad @ rhs.transpose(), lhs_axes)
+        # rhs_grad = summation(lhs.transpose() @ out_grad, rhs_axes)
+        # lhs_grad = lhs_grad if lhs_grad.shape == lhs.shape else lhs_grad.reshape(lhs.shape)
+        # rhs_grad = rhs_grad if rhs_grad.shape == rhs.shape else rhs_grad.reshape(rhs.shape)
+        # return lhs_grad, rhs_grad
+        # ### END YOUR SOLUTION
 
 
 def matmul(a, b):
     return MatMul()(a, b)
+
+class BatchMatMul(TensorOp):
+    def compute(self, a, b):
+        ### BEGIN YOUR SOLUTION
+        a=a.compact()
+        b=b.compact()
+        out_shape = tuple(a.shape[:-1]) + (b.shape[-1],)
+        a = array_api.split(a.reshape((-1, a.shape[-2], a.shape[-1])).compact(), 0)
+        b = array_api.split(b.reshape((-1, b.shape[-2], b.shape[-1])).compact(), 0)
+        assert len(a) == len(b)
+        res = []
+        for i in range(len(a)):
+            res.append(a[i]@b[i])
+        return array_api.stack(tuple(res), axis=0).reshape(out_shape).compact()
+        ### END YOUR SOLUTION
+
+    def gradient(self, out_grad, node):
+        lhs, rhs = node.inputs
+        grad_a = batch_matmul(out_grad, transpose(rhs))
+        grad_b = batch_matmul(transpose(lhs), out_grad)
+        if grad_a.shape != lhs.shape:
+            grad_a = grad_a.sum(tuple(range(len(grad_a.shape) - len(lhs.shape))))
+        if grad_b.shape != rhs.shape:
+            grad_b = grad_b.sum(tuple(range(len(grad_b.shape) - len(rhs.shape))))
+        return grad_a, grad_b
+def batch_matmul(a, b):
+    return BatchMatMul()(a, b)
 
 
 class Negate(TensorOp):
@@ -452,6 +487,25 @@ class LogSumExp(TensorOp):
 
 def logsumexp(a, axes=None):
     return LogSumExp(axes=axes)(a)
+
+class Softmax(TensorOp):
+    def compute(self, Z):
+        ### BEGIN YOUR SOLUTION
+        max_z = array_api.max(Z, axis=len(Z.shape)-1, keepdims=True)
+        Z = array_api.exp(Z - max_z.broadcast_to(Z.shape))
+        return (Z / Z.sum(axis=len(Z.shape)-1, keepdims=True).broadcast_to(Z.shape)).compact()
+        ### END YOUR SOLUTION
+
+    def gradient(self, out_grad, node):
+        ### BEGIN YOUR SOLUTION
+        input = node.inputs[0]
+        hx = softmax(input)
+        ones = init.ones_like(hx)
+        return out_grad.broadcast_to(input.shape) * hx * (ones-hx)
+        ### END YOUR SOLUTION
+
+def softmax(Z):
+    return Softmax()(Z)
 
 
 class Tanh(TensorOp):
