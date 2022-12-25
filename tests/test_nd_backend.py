@@ -103,6 +103,21 @@ def test_matmul(m, n, p, device):
     B = ndl.Tensor(nd.array(_B), device=device)
     np.testing.assert_allclose(_A @ _B, (A @ B).numpy(), atol=1e-5, rtol=1e-5)
 
+BMATMUL_DIMS = [(3,3,4, 16, 16),
+    (5,5,4, 8, 8),
+    (3,1,2, 2, 3),
+    (4,3,3, 4, 5),
+    (1,5,5, 4, 3),
+    (11,16,15, 16, 32),
+    (12,64,64, 64, 64)]
+@pytest.mark.parametrize("j,k,m,n,p", BMATMUL_DIMS)
+@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
+def test_batch_matmul(j,k,m, n, p, device):
+    _A = np.random.randn(j,k,m, n).astype(np.float32)
+    _B = np.random.randn(j,k,n, p).astype(np.float32)
+    A = ndl.Tensor(nd.array(_A), device=device)
+    B = ndl.Tensor(nd.array(_B), device=device)
+    np.testing.assert_allclose(_A @ _B, ndl.ops.batch_matmul(A, B).numpy(), atol=1e-5, rtol=1e-5)
 
 @pytest.mark.parametrize("shape", GENERAL_SHAPES)
 @pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
@@ -273,6 +288,29 @@ def test_logsumexp_backward(shape, axes, device):
     _A = np.random.randn(*shape).astype(np.float32)
     A = ndl.Tensor(nd.array(_A), device=device)
     backward_check(ndl.logsumexp, A)
+
+def softmax(Z):
+    Z = np.exp(Z - Z.max(axis=-1, keepdims=True))
+    return Z / Z.sum(axis=-1, keepdims=True)
+
+@pytest.mark.parametrize("shape, axes", SUMMATION_PARAMETERS)
+@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
+def test_softmax(shape, axes, device):
+    _A = np.random.randn(*shape).astype(np.float32)
+    A = ndl.Tensor(nd.array(_A), device=device)
+    if axes is None:
+        t_axes = tuple(list(range(len(shape))))
+    else:
+        t_axes = axes
+    np.testing.assert_allclose(softmax(_A), ndl.softmax(A).numpy(), atol=1e-5, rtol=1e-5)
+
+@pytest.mark.parametrize("shape, axes", SUMMATION_PARAMETERS)
+@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
+def test_softmax_backward(shape, axes, device):
+    _A = np.random.randn(*shape).astype(np.float32)
+    A = ndl.Tensor(nd.array(_A), device=device)
+    backward_check(ndl.softmax, A)
+
 
 TEST_LOGSUMEXP_PARAMETERS = [((3, 2), 0), ((2, 1, 2, 3), 3)]
 @pytest.mark.parametrize("shape, axes", TEST_LOGSUMEXP_PARAMETERS)
