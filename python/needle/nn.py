@@ -5,8 +5,13 @@ from needle.autograd import Tensor
 from needle import ops
 import needle.init as init
 import numpy as np
+import math
+import torch
 
-
+import operator
+from functools import reduce
+def prod(x):
+    return reduce(operator.mul, x, 1)
 class Parameter(Tensor):
     """A special kind of tensor that represents parameters."""
 
@@ -146,6 +151,9 @@ class Sequential(Module):
         super().__init__()
         self.modules = modules
 
+    def add_module(self, module):
+        self.modules.append(module)
+
     def forward(self, x: Tensor) -> Tensor:
         ### BEGIN YOUR SOLUTION
         for module in self.modules:
@@ -281,7 +289,7 @@ class Dropout(Module):
         y = x
         if self.training:
             # probi = 0 with probability p
-            prob = init.randb(*x.shape, p=1 - self.p)
+            prob = init.randb(*x.shape, p=1 - self.p, device=x.device, dtype=x.dtype)
             y = x / (1 - self.p) * prob
         return y
         ### END YOUR SOLUTION
@@ -730,12 +738,43 @@ class Embedding(Module):
         ### END YOUR SOLUTION
 
 
-# class Softmax(Module):
-#     def forward(self, Z: Tensor):
-#         Z = ops.exp(Z - Z.max(axis=-1, keepdims=True))
-#         return Z / Z.sum(axis=-1, keepdims=True)
+class Encoder(Module):
+    """The base encoder interface for the encoder-decoder architecture."""
+    def __init__(self):
+        super().__init__()
 
-class MultiheadAttention(Module):
+        # Later there can be additional arguments (e.g., length excluding padding)
+    def forward(self, X, *args):
+        raise NotImplementedError
+
+
+class Decoder(Module):
+    """The base decoder interface for the encoder-decoder architecture."""
+    def __init__(self):
+        super().__init__()
+
+    # Later there can be additional arguments (e.g., length excluding padding)
+    def init_state(self, enc_all_outputs, *args):
+        raise NotImplementedError
+
+    def forward(self, X, state):
+        raise NotImplementedError
+
+
+class EncoderDecoder(Module):
+    """The base class for the encoder-decoder architecture."""
+    def __init__(self, encoder, decoder, **kwargs):
+        super().__init__()
+        self.encoder = encoder
+        self.decoder = decoder
+
+    def forward(self, enc_X, dec_X, *args):
+        enc_outputs = self.encoder(enc_X, *args)
+        dec_state = self.decoder.init_state(enc_outputs, *args)
+        return self.decoder(dec_X, dec_state)
+
+
+class MultiheadAttention_test(Module):
     def __init__(self, mask, heads, W_KQV, W_out, device=None, dtype="float32"):
         super().__init__()
         self.mask = mask
@@ -744,6 +783,7 @@ class MultiheadAttention(Module):
                                requires_grad=True)
         self.W_out = Parameter(W_out, device=device, dtype=dtype,
                                requires_grad=True)
+        self.attention_weights = None
 
     def forward(self, X: Tensor) -> Tensor:
         def get_tensors(ttuple, start, end):
@@ -772,10 +812,11 @@ class MultiheadAttention(Module):
         # mask: T x T
         attn = ops.softmax(ops.batch_matmul(K, Q.transpose()) / ((d // self.heads) ** 0.5) + self.mask.broadcast_to(
             (B, self.heads, T, T)))
+        self.attention_weights = attn
         attn_output = (ops.batch_matmul(attn, V).transpose((1, 2)).reshape((B * T, d)) @ self.W_out).reshape(
             (B, T, self.W_out.shape[-1]))
         return attn_output, attn
-class Transformer(Module):
+class Transformer_test(Module):
     def __init__(self, mask, heads, W_KQV, W_out, W_ff1, W_ff2, eps, device=None, dtype="float32"):
         super().__init__()
         self.mask = mask
@@ -789,13 +830,219 @@ class Transformer(Module):
         self.W_ff2 = Parameter(W_ff2, device=device, dtype=dtype,
                                requires_grad=True)
         self.layer_norm = LayerNorm(eps)
-        self.multihead_attention = MultiheadAttention(mask, heads, W_KQV, W_out, device=device, dtype=dtype)
+        self.multihead_attention = MultiheadAttention_test(mask, heads, W_KQV, W_out, device=device, dtype=dtype)
+        self.relu = ReLU()
+
     def forward(self, X: Tensor) -> Tensor:
-        relu = ReLU()
         Z = self.layer_norm(X + self.multihead_attention(X)[0])
         B,T,d=Z.shape
-        print("Z.shape",Z.shape)
-        print("W_ff1.shape", self.W_ff1.shape)
-        print("W_ff2.shape", self.W_ff2.shape)
-        rhs = (relu(Z.reshape((B*T, d)) @ self.W_ff1) @ self.W_ff2).reshape((B,T,d))
+        rhs = (self.relu(Z.reshape((B*T, d)) @ self.W_ff1) @ self.W_ff2).reshape((B,T,d))
         return self.layer_norm(Z + rhs)
+
+
+class DotProductAttention(Module):
+    """Scaled dot product attention.
+
+    Defined in :numref:`subsec_batch_dot`"""
+    def __init__(self, dropout, num_heads=None):
+        super().__init__()
+        self.dropout = Dropout(dropout)
+        self.num_heads = num_heads  # To be covered later
+
+    # Shape of queries: (batch_size, no. of queries, d)
+    # Shape of keys: (batch_size, no. of key-value pairs, d)
+    # Shape of values: (batch_size, no. of key-value pairs, value dimension)
+    # Shape of valid_lens: (batch_size,) or (batch_size, no. of queries)
+    def masked_softmax(self, X, valid_lens):
+        # valid_lens: numpy array
+        def _sequence_mask(X: Tensor, valid_lens, value=0):
+            # X: n * d
+            maxlen = X.shape[-1]
+            mask = (torch.arange((maxlen), dtype=torch.float32)[None, :].numpy() < valid_lens[:, None])
+            mask_mul = mask.astype(np.float32)
+            mask_add = (~mask).astype(np.float32) * value
+            mask_mul = Tensor(mask_mul, device=X.device, dtype=X.dtype)
+            mask_add = Tensor(mask_add, device=X.device, dtype=X.dtype)
+            return X*mask_mul + mask_add
+
+        if valid_lens is None:
+            return ops.softmax(X)
+        else:
+            shape = X.shape
+            if valid_lens.dim() == 1:
+                assert len(valid_lens.shape[0]) == X.shape[0]
+                valid_lens = valid_lens.repeat(X.shape[1])
+            else:
+                valid_lens = valid_lens.reshape(-1)
+            # On the last axis, replace masked elements with a very large negative
+            # value, whose exponentiation outputs 0
+            X = _sequence_mask(X.reshape(prod(shape[:-1]), shape[-1]), valid_lens, value=-1e6)
+            return ops.softmax(X.reshape(shape))
+    def forward(self, queries, keys, values, valid_lens=None,
+                window_mask=None):
+        d = queries.shape[-1]
+        # Swap the last two dimensions of keys with keys.transpose(1, 2)
+        scores = ops.batch_matmul(queries, keys.transpose(1, 2)) / math.sqrt(d)
+        if window_mask is not None:  # To be covered later
+            num_windows = window_mask.shape[0]
+            n, num_queries, num_kv_pairs = scores.shape
+            # Shape of window_mask: (num_windows, no. of queries,
+            # no. of key-value pairs)
+            scores = ops.reshape(
+                scores, (n//(num_windows*self.num_heads), num_windows,
+                         self.num_heads, num_queries, num_kv_pairs
+                        )) + ops.reshape(window_mask,(1,window_mask.shape[0],1)+window_mask.shape[1:])
+            scores = ops.reshape(scores, (n, num_queries, num_kv_pairs))
+        self.attention_weights = self.masked_softmax(scores, valid_lens)
+        return ops.bmm(self.dropout(self.attention_weights), values)
+
+class MultiHeadAttention(Module):
+    """Multi-head attention.
+
+    Defined in :numref:`sec_multihead-attention`"""
+
+    def __init__(self, num_input, num_hiddens, num_heads, dropout, bias=False, device=None, dtype="float32"):
+        super().__init__()
+        self.num_heads = num_heads
+        self.attention = DotProductAttention(dropout, num_heads)
+        self.W_q = Linear(num_input, num_hiddens, bias=bias, device=device, dtype=dtype)
+        self.W_k = Linear(num_input, num_hiddens, bias=bias, device=device, dtype=dtype)
+        self.W_v = Linear(num_input, num_hiddens, bias=bias, device=device, dtype=dtype)
+        self.W_o = Linear(num_input, num_hiddens, bias=bias, device=device, dtype=dtype)
+
+    def forward(self, queries, keys, values, valid_lens, window_mask=None):
+        # Shape of queries, keys, or values:
+        # (batch_size, no. of queries or key-value pairs, num_hiddens)
+        # Shape of valid_lens: (batch_size,) or (batch_size, no. of queries)
+        # After transposing, shape of output queries, keys, or values:
+        # (batch_size * num_heads, no. of queries or key-value pairs,
+        # num_hiddens / num_heads)
+        queries = self.transpose_qkv(self.W_q(queries))
+        keys = self.transpose_qkv(self.W_k(keys))
+        values = self.transpose_qkv(self.W_v(values))
+
+        if valid_lens is not None:
+            # On axis 0, copy the first item (scalar or vector) for num_heads
+            # times, then copy the next item, and so on
+            valid_lens = torch.repeat_interleave(
+                valid_lens, repeats=self.num_heads, dim=0)
+
+        # Shape of output: (batch_size * num_heads, no. of queries,
+        # num_hiddens / num_heads)
+        output = self.attention(queries, keys, values, valid_lens,
+                                window_mask)
+        # Shape of output_concat: (batch_size, no. of queries, num_hiddens)
+        output_concat = self.transpose_output(output)
+        return self.W_o(output_concat)
+
+    def transpose_qkv(self, X):
+        """Transposition for parallel computation of multiple attention heads.
+
+        Defined in :numref:`sec_multihead-attention`"""
+        # Shape of input X: (batch_size, no. of queries or key-value pairs,
+        # num_hiddens). Shape of output X: (batch_size, no. of queries or
+        # key-value pairs, num_heads, num_hiddens / num_heads)
+        X = X.reshape(X.shape[0], X.shape[1], self.num_heads, -1)
+        # Shape of output X: (batch_size, num_heads, no. of queries or key-value
+        # pairs, num_hiddens / num_heads)
+        X = X.permute(0, 2, 1, 3)
+        # Shape of output: (batch_size * num_heads, no. of queries or key-value
+        # pairs, num_hiddens / num_heads)
+        return X.reshape(-1, X.shape[2], X.shape[3])
+
+    def transpose_output(self, X):
+        """Reverse the operation of transpose_qkv.
+
+        Defined in :numref:`sec_multihead-attention`"""
+        X = X.reshape(-1, self.num_heads, X.shape[1], X.shape[2])
+        X = X.permute(0, 2, 1, 3)
+        return X.reshape(X.shape[0], X.shape[1], -1)
+
+class PositionWiseFFN(Module):
+    def __init__(self, ffn_num_input, ffn_num_hiddens, ffn_num_outputs, device=None, dtype="float32"):
+        super().__init__()
+        self.dense1 = Linear(ffn_num_input, ffn_num_hiddens, device=device, dtype=dtype)
+        self.relu = ReLU()
+        self.dense2 = Linear(ffn_num_hiddens, ffn_num_outputs, device=device, dtype=dtype)
+
+    def forward(self, X: Tensor) -> Tensor:
+        return self.dense2(self.relu(self.dense1(X)))
+
+class AddNorm(Module):
+    def __init__(self, eps=1e-5, dropout=0.5):
+        super().__init__()
+        self.dropout = Dropout(dropout)
+        self.ln = LayerNorm(eps)
+    def forward(self, X: Tensor, Y: Tensor) -> Tensor:
+        # ###
+        # import torch.nn as nn
+        # import torch
+        # ln = nn.LayerNorm(X.shape[-1])
+        # x = self.dropout(Y) + X
+        # y_ = ln(torch.tensor(x.numpy()))
+        # y = self.ln(x)
+        # print("AddNorm", np.linalg.norm(y.numpy()-y_.detach().numpy()))
+        # ###
+        return self.ln(self.dropout(Y) + X)
+
+class TransformerEncoderBlock_test(Module):
+    """Transformer Encoder Block"""
+    def __init__(self, mask, num_heads, W_KQV, W_out,
+                ffn_num_input, ffn_num_hiddens, num_hiddens,
+                 eps, dropout, device=None, dtype="float32"):
+        super().__init__()
+        self.attention = MultiheadAttention_test( mask, num_heads, W_KQV, W_out, device=device, dtype=dtype)
+        self.addnorm1 = AddNorm(eps, dropout)
+        self.ffn = PositionWiseFFN(
+            ffn_num_input, ffn_num_hiddens, num_hiddens, device=device, dtype=dtype)
+        self.addnorm2 = AddNorm(eps, dropout)
+
+    def forward(self, X):
+        Y = self.addnorm1(X, self.attention(X)[0])
+        return self.addnorm2(Y, self.ffn(Y))
+
+
+class PositionalEncoding(Module):
+    """Positional encoding."""
+    def __init__(self, num_hiddens, dropout, max_len=1000):
+        super().__init__()
+        self.dropout = Dropout(dropout)
+        # Create a long enough P
+        self.P = np.zeros((1, max_len, num_hiddens))
+        X = np.arange(max_len).reshape(-1, 1) / np.power(
+            10000, np.arange(0, num_hiddens, 2) / num_hiddens)
+        self.P[:, :, 0::2] = np.sin(X)
+        self.P[:, :, 1::2] = np.cos(X)
+
+    def forward(self, X):
+        P = Tensor(self.P[:, :X.shape[1], :], device=X.device, dtype=X.dtype)
+        X = X + P
+        return self.dropout(X)
+
+class TransformerEncoder_test(Encoder):
+    """Transformer Encoder"""
+    def __init__(self, vocab_size, num_hiddens, num_blks, mask, num_heads, W_KQV, W_out,
+                ffn_num_input, ffn_num_hiddens,
+                 eps, dropout, device=None, dtype="float32"):
+        super().__init__()
+        self.num_hiddens = num_hiddens
+        self.embedding = Embedding(vocab_size, num_hiddens, device=device, dtype=dtype)
+        self.pos_encoding = PositionalEncoding(num_hiddens, dropout)
+        self.blks = Sequential()
+        for i in range(num_blks):
+            self.blks.add_module(
+                TransformerEncoderBlock_test(mask, num_heads, W_KQV, W_out,
+                ffn_num_input, ffn_num_hiddens, num_hiddens,
+                 eps, dropout, device=device, dtype=dtype))
+
+    def forward(self, X, valid_lens, *args):
+        # Since positional encoding values are between -1 and 1, the embedding
+        # values are multiplied by the square root of the embedding dimension
+        # to rescale before they are summed up
+        X = self.pos_encoding(self.embedding(X) * math.sqrt(self.num_hiddens))
+        self.attention_weights = [None] * len(self.blks)
+        for i, blk in enumerate(self.blks):
+            X = blk(X, valid_lens)
+            self.attention_weights[
+                i] = blk.attention.attention_weights
+        return X

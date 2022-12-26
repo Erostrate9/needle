@@ -3,6 +3,8 @@ import needle
 from typing import List, Optional, NamedTuple, Tuple, Union
 from collections import namedtuple
 import numpy
+import operator
+from functools import reduce
 from needle import init
 
 # needle version
@@ -11,7 +13,8 @@ TENSOR_COUNTER = 0
 
 from .backend_selection import Device, array_api, NDArray, default_device
 
-
+def prod(x):
+    return reduce(operator.mul, x, 1)
 class Op:
     """Operator definition."""
 
@@ -340,10 +343,26 @@ class Tensor(Value):
             return needle.ops.DivScalar(other)(self)
 
     def __matmul__(self, other):
-        return needle.ops.MatMul()(self, other)
+        if len(self.shape)==2 and len(other.shape)==2:
+            return needle.ops.MatMul()(self, other)
+        elif len(self.shape)>2 and len(other.shape)==2:
+            lhs = self.reshape((prod(self.shape[:-1]), self.shape[-1]))
+            return needle.ops.MatMul()(lhs, other).reshape(self.shape[:-1]+(other.shape[-1],))
+        elif len(self.shape) == len(other.shape):
+            return needle.ops.BatchMatMul()(self, other)
+
+    def __getitem__(self, indices):
+        return needle.ops.get_item(self, indices)
+
 
     def matmul(self, other):
-        return needle.ops.MatMul()(self, other)
+        if len(self.shape) == 2 and len(other.shape) == 2:
+            return needle.ops.MatMul()(self, other)
+        elif len(self.shape) > 2 and len(other.shape) == 2:
+            lhs = self.reshape((prod(self.shape[:-1]), self.shape[-1]))
+            return needle.ops.MatMul()(lhs, other).reshape((self.shape[-1], other.shape[-1]))
+        elif len(self.shape) == len(other.shape):
+            return needle.ops.BatchMatMul()(self, other)
 
     def sum(self, axes=None):
         return needle.ops.Summation(axes)(self)
@@ -359,6 +378,9 @@ class Tensor(Value):
 
     def transpose(self, axes=None):
         return needle.ops.Transpose(axes)(self)
+
+    def permute(self, axes=None):
+        return needle.ops.Permute(axes)(self)
 
     def split(self, axis = 0):
         return needle.ops.Split(axis)(self)

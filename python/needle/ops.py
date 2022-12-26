@@ -205,9 +205,33 @@ class Transpose(TensorOp):
         return out_grad.transpose(self.axes)
         ### END YOUR SOLUTION
 
-
 def transpose(a, axes=None):
     return Transpose(axes)(a)
+class Permute(TensorOp):
+    def __init__(self, axes: Optional[tuple] = None):
+        self.axes = axes
+
+    def compute(self, a):
+        ### BEGIN YOUR SOLUTION
+        if self.axes is None:
+            return a
+        assert len(self.axes) == len(a.shape)
+        return a.permute(self.axes)
+        ### END YOUR SOLUTION
+
+    def gradient(self, out_grad, node):
+        ### BEGIN YOUR SOLUTION
+        if self.axes is None:
+            return out_grad
+
+        axes = [0]*len(self.axes)
+        for i, idx in enumerate(self.axes):
+            axes[idx] = i
+        return out_grad.permute(axes)
+        ### END YOUR SOLUTION
+
+def permute(a, axes=None):
+    return Permute(axes)(a)
 
 
 class Reshape(TensorOp):
@@ -385,6 +409,10 @@ class BatchMatMul(TensorOp):
             grad_b = grad_b.sum(tuple(range(len(grad_b.shape) - len(rhs.shape))))
         return grad_a, grad_b
 def batch_matmul(a, b):
+    return BatchMatMul()(a, b)
+
+
+def bmm(a, b):
     return BatchMatMul()(a, b)
 
 
@@ -730,3 +758,26 @@ class Conv(TensorOp):
 
 def conv(a, b, stride=1, padding=1):
     return Conv(stride, padding)(a, b)
+
+
+class GetItem(TensorOp):
+    def __init__(self, shape: tuple, indices: tuple):
+        """
+        Args:
+            shape: shape of the input
+            indices: tuple contains slice
+        """
+        self.shape = shape
+        self.indices = indices
+
+    def compute(self, a):
+        return a[self.idxs]
+
+    def gradient(self, out_grad, node):
+        zeros = array_api.full(self.shape, 0)
+        zeros[self.indices] = out_grad.numpy()
+        return Tensor(zeros, device=out_grad.device)
+
+
+def get_item(a, idxs):
+    return GetItem(a.shape, idxs)(a)
