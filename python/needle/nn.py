@@ -153,15 +153,15 @@ class Sigmoid(Module):
 class Sequential(Module):
     def __init__(self, *modules):
         super().__init__()
-        self.modules = modules
+        self.modules = list(modules)
 
     def add_module(self, module):
         self.modules.append(module)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, *args) -> Tensor:
         ### BEGIN YOUR SOLUTION
         for module in self.modules:
-            x = module(x)
+            x = module(x, *args)
         return x
         ### END YOUR SOLUTION
 
@@ -874,8 +874,8 @@ class DotProductAttention(Module):
             mask = (torch.arange((maxlen), dtype=torch.float32)[None, :].numpy() < valid_lens[:, None])
             mask_mul = mask.astype(np.float32)
             mask_add = (~mask).astype(np.float32) * value
-            mask_mul = Tensor(mask_mul, device=X.device, dtype=X.dtype)
-            mask_add = Tensor(mask_add, device=X.device, dtype=X.dtype)
+            mask_mul = Tensor(mask_mul, device=X.device, dtype=X.dtype, requires_grad=False)
+            mask_add = Tensor(mask_add, device=X.device, dtype=X.dtype, requires_grad=False)
             return X * mask_mul + mask_add
 
         if valid_lens is None:
@@ -1043,7 +1043,7 @@ class PositionalEncoding(Module):
 
     def forward(self, X):
         P = Tensor(self.P[:, :X.shape[1], :], device=X.device, dtype=X.dtype, requires_grad=False)
-        X = X + P
+        X = X + P.broadcast_to(X.shape)
         return self.dropout(X)
 
 
@@ -1111,3 +1111,32 @@ class TransformerEncoderBlock(Module):
         # self.res = res.numpy()
         Y = self.addnorm1(X, self.attention(X, X, X, valid_lens))
         return self.addnorm2(Y, self.ffn(Y))
+
+
+class TransformerEncoder(Encoder):
+    """Transformer Encoder"""
+    def __init__(self, vocab_size, key_size, query_size, value_size,
+                 num_hiddens, ffn_num_input, ffn_num_hiddens,
+                 num_heads, num_layers, dropout, use_bias=False, device=None, dtype="float32"):
+        super().__init__()
+        self.num_hiddens = num_hiddens
+        self.embedding = Embedding(vocab_size, num_hiddens, device=device, dtype=dtype)
+        self.pos_encoding = PositionalEncoding(num_hiddens, dropout)
+        self.blks = Sequential()
+        for i in range(num_layers):
+            self.blks.add_module(
+                TransformerEncoderBlock(key_size, query_size, value_size, num_hiddens,
+                              ffn_num_input, ffn_num_hiddens,
+                             num_heads, dropout, use_bias, device=device, dtype=dtype))
+        self.attention_weights = [None] * len(self.blks.modules)
+
+    def forward(self, X, valid_lens):
+        # Since positional encoding values are between -1 and 1, the embedding
+        # values are multiplied by the square root of the embedding dimension
+        # to rescale before they are summed up
+        X = self.pos_encoding(self.embedding(X) * math.sqrt(self.num_hiddens))
+        y = self.blks(X, valid_lens)
+        for i, blk in enumerate(self.blks.modules):
+            self.attention_weights[
+                i] = blk.attention.attention.attention_weights
+        return y
