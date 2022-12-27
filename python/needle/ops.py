@@ -771,7 +771,7 @@ class GetItem(TensorOp):
         self.indices = indices
 
     def compute(self, a):
-        return a[self.idxs]
+        return a[self.indices]
 
     def gradient(self, out_grad, node):
         zeros = array_api.full(self.shape, 0)

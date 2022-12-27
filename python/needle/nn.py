@@ -869,20 +869,20 @@ class DotProductAttention(Module):
             return ops.softmax(X)
         else:
             shape = X.shape
-            if valid_lens.dim() == 1:
-                assert len(valid_lens.shape[0]) == X.shape[0]
+            if len(valid_lens.shape) == 1:
+                assert valid_lens.shape[0] == X.shape[0]
                 valid_lens = valid_lens.repeat(X.shape[1])
             else:
                 valid_lens = valid_lens.reshape(-1)
             # On the last axis, replace masked elements with a very large negative
             # value, whose exponentiation outputs 0
-            X = _sequence_mask(X.reshape(prod(shape[:-1]), shape[-1]), valid_lens, value=-1e6)
+            X = _sequence_mask(X.reshape((prod(shape[:-1]), shape[-1])), valid_lens, value=-1e6)
             return ops.softmax(X.reshape(shape))
     def forward(self, queries, keys, values, valid_lens=None,
                 window_mask=None):
         d = queries.shape[-1]
         # Swap the last two dimensions of keys with keys.transpose(1, 2)
-        scores = ops.batch_matmul(queries, keys.transpose(1, 2)) / math.sqrt(d)
+        scores = ops.batch_matmul(queries, keys.transpose((1, 2))) / math.sqrt(d)
         if window_mask is not None:  # To be covered later
             num_windows = window_mask.shape[0]
             n, num_queries, num_kv_pairs = scores.shape
@@ -901,14 +901,18 @@ class MultiHeadAttention(Module):
 
     Defined in :numref:`sec_multihead-attention`"""
 
-    def __init__(self, num_input, num_hiddens, num_heads, dropout, bias=False, device=None, dtype="float32"):
+    def __init__(self, key_size, query_size, value_size, num_hiddens,
+                 num_heads, dropout, bias=False, device=None, dtype="float32"):
         super().__init__()
         self.num_heads = num_heads
-        self.attention = DotProductAttention(dropout, num_heads)
-        self.W_q = Linear(num_input, num_hiddens, bias=bias, device=device, dtype=dtype)
-        self.W_k = Linear(num_input, num_hiddens, bias=bias, device=device, dtype=dtype)
-        self.W_v = Linear(num_input, num_hiddens, bias=bias, device=device, dtype=dtype)
-        self.W_o = Linear(num_input, num_hiddens, bias=bias, device=device, dtype=dtype)
+        self.attention = DotProductAttention(dropout)
+        self.W_q = Linear(query_size, num_hiddens, bias=bias, device=device, dtype=dtype)
+        self.W_k = Linear(key_size, num_hiddens, bias=bias, device=device, dtype=dtype)
+        self.W_v = Linear(value_size, num_hiddens, bias=bias, device=device, dtype=dtype)
+        self.W_o = Linear(num_hiddens, num_hiddens, bias=bias, device=device, dtype=dtype)
+        ### test
+        self.vl = None
+        self.output = None
 
     def forward(self, queries, keys, values, valid_lens, window_mask=None):
         # Shape of queries, keys, or values:
@@ -924,13 +928,14 @@ class MultiHeadAttention(Module):
         if valid_lens is not None:
             # On axis 0, copy the first item (scalar or vector) for num_heads
             # times, then copy the next item, and so on
-            valid_lens = torch.repeat_interleave(
-                valid_lens, repeats=self.num_heads, dim=0)
+            valid_lens = valid_lens.repeat(repeats=self.num_heads, axis=0)
 
         # Shape of output: (batch_size * num_heads, no. of queries,
         # num_hiddens / num_heads)
+        self.vl = valid_lens
         output = self.attention(queries, keys, values, valid_lens,
                                 window_mask)
+        self.output = output
         # Shape of output_concat: (batch_size, no. of queries, num_hiddens)
         output_concat = self.transpose_output(output)
         return self.W_o(output_concat)
@@ -942,21 +947,22 @@ class MultiHeadAttention(Module):
         # Shape of input X: (batch_size, no. of queries or key-value pairs,
         # num_hiddens). Shape of output X: (batch_size, no. of queries or
         # key-value pairs, num_heads, num_hiddens / num_heads)
-        X = X.reshape(X.shape[0], X.shape[1], self.num_heads, -1)
+        X = X.reshape((X.shape[0], X.shape[1], self.num_heads, -1))
         # Shape of output X: (batch_size, num_heads, no. of queries or key-value
         # pairs, num_hiddens / num_heads)
-        X = X.permute(0, 2, 1, 3)
+        X = X.permute((0, 2, 1, 3))
         # Shape of output: (batch_size * num_heads, no. of queries or key-value
         # pairs, num_hiddens / num_heads)
-        return X.reshape(-1, X.shape[2], X.shape[3])
+        X = X.reshape((-1, X.shape[2], X.shape[3]))
+        return X
 
     def transpose_output(self, X):
         """Reverse the operation of transpose_qkv.
 
         Defined in :numref:`sec_multihead-attention`"""
-        X = X.reshape(-1, self.num_heads, X.shape[1], X.shape[2])
-        X = X.permute(0, 2, 1, 3)
-        return X.reshape(X.shape[0], X.shape[1], -1)
+        X = X.reshape((-1, self.num_heads, X.shape[1], X.shape[2]))
+        X = X.permute((0, 2, 1, 3))
+        return X.reshape((X.shape[0], X.shape[1], -1))
 
 class PositionWiseFFN(Module):
     def __init__(self, ffn_num_input, ffn_num_hiddens, ffn_num_outputs, device=None, dtype="float32"):
