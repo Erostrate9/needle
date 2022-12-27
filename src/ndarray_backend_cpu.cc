@@ -273,6 +273,14 @@ void EwiseExp(const AlignedArray& a, AlignedArray* out){
 void EwiseTanh(const AlignedArray& a, AlignedArray* out){
     EwiseOP(a, out, tanhf);
 }
+// *   - EwiseSin
+void EwiseSin(const AlignedArray& a, AlignedArray* out){
+    EwiseOP(a, out, sinf);
+}
+// *   - EwiseCos
+void EwiseCos(const AlignedArray& a, AlignedArray* out){
+    EwiseOP(a, out, cosf);
+}
 /// END YOUR SOLUTION
 
 void Matmul(const AlignedArray& a, const AlignedArray& b, AlignedArray* out, uint32_t m, uint32_t n,
@@ -493,6 +501,8 @@ PYBIND11_MODULE(ndarray_backend_cpu, m) {
   m.def("ewise_log", EwiseLog);
   m.def("ewise_exp", EwiseExp);
   m.def("ewise_tanh", EwiseTanh);
+  m.def("ewise_sin", EwiseSin);
+  m.def("ewise_cos", EwiseCos);
 
   m.def("matmul", Matmul);
   m.def("matmul_tiled", MatmulTiled);

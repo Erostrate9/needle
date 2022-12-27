@@ -419,6 +419,23 @@ void EwiseTanh(const CudaArray& a, CudaArray* out) {
   EwiseTanhKernel EWISE_UNARY_KERNEL;
 }
 
+//  *   - EwiseSin
+__global__ void EwiseSinKernel(const scalar_t* a, scalar_t* out, size_t size) {
+    KERNEL_LEFT = sinf(a[gid]);
+}
+void EwiseSin(const CudaArray& a, CudaArray* out) {
+  INIT_DIM;
+  EwiseSinKernel EWISE_UNARY_KERNEL;
+}
+
+//  *   - EwiseCos
+__global__ void EwiseCosKernel(const scalar_t* a, scalar_t* out, size_t size) {
+    KERNEL_LEFT = cosf(a[gid]);
+}
+void EwiseCos(const CudaArray& a, CudaArray* out) {
+  INIT_DIM;
+  EwiseCosKernel EWISE_UNARY_KERNEL;
+}
 /// END YOUR SOLUTION
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -695,6 +712,8 @@ PYBIND11_MODULE(ndarray_backend_cuda, m) {
   m.def("ewise_log", EwiseLog);
   m.def("ewise_exp", EwiseExp);
   m.def("ewise_tanh", EwiseTanh);
+  m.def("ewise_sin", EwiseSin);
+  m.def("ewise_cos", EwiseCos);
 
   m.def("matmul", Matmul);
 

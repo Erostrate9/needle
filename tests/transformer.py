@@ -103,7 +103,7 @@ encoder_blk_ = ndl.nn.TransformerEncoderBlock_test(mask, num_heads, W_KQV, W_out
                  eps, dropout, device=device, dtype="float32")
 
 X_ = ndl.Tensor(X.numpy(), device=device, dtype="float32")
-y_ =  encoder_blk_(X_)
+y_ = encoder_blk_(X_)
 print(y_.shape)
 
 trans = nn.TransformerEncoderLayer(d, num_heads, dim_feedforward=48,

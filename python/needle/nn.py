@@ -10,8 +10,12 @@ import torch
 
 import operator
 from functools import reduce
+
+
 def prod(x):
     return reduce(operator.mul, x, 1)
+
+
 class Parameter(Tensor):
     """A special kind of tensor that represents parameters."""
 
@@ -257,6 +261,7 @@ class LayerNorm1d(Module):
         return y
         ### END YOUR SOLUTION
 
+
 class LayerNorm(Module):
     def __init__(self, eps=1e-5):
         super().__init__()
@@ -267,17 +272,18 @@ class LayerNorm(Module):
         # Z: (n1 x n2 x ... x nd)
         # e: (n1 x n2 x ... x nd)
         # var:(n1 x n2 x ... x nd)
-        axis = len(Z.shape)-1
+        axis = len(Z.shape) - 1
         d = Z.shape[-1]
         # mean
-        e = Z.sum(axes=(axis,)).reshape(Z.shape[:-1]+(1,))/d
+        e = Z.sum(axes=(axis,)).reshape(Z.shape[:-1] + (1,)) / d
         # var
-        var = (((Z - e.broadcast_to(Z.shape)) ** 2).sum(axes=(axis,)) / d).reshape(Z.shape[:-1]+(1,))
+        var = (((Z - e.broadcast_to(Z.shape)) ** 2).sum(axes=(axis,)) / d).reshape(Z.shape[:-1] + (1,))
 
         a = (Z - e.broadcast_to(Z.shape))
-        b = ((var.broadcast_to(Z.shape) + self.eps)**0.5)
+        b = ((var.broadcast_to(Z.shape) + self.eps) ** 0.5)
         return a / b
         ### END YOUR SOLUTION
+
 
 class Dropout(Module):
     def __init__(self, p=0.5):
@@ -740,16 +746,19 @@ class Embedding(Module):
 
 class Encoder(Module):
     """The base encoder interface for the encoder-decoder architecture."""
+
     def __init__(self):
         super().__init__()
 
         # Later there can be additional arguments (e.g., length excluding padding)
+
     def forward(self, X, *args):
         raise NotImplementedError
 
 
 class Decoder(Module):
     """The base decoder interface for the encoder-decoder architecture."""
+
     def __init__(self):
         super().__init__()
 
@@ -763,6 +772,7 @@ class Decoder(Module):
 
 class EncoderDecoder(Module):
     """The base class for the encoder-decoder architecture."""
+
     def __init__(self, encoder, decoder, **kwargs):
         super().__init__()
         self.encoder = encoder
@@ -816,6 +826,8 @@ class MultiheadAttention_test(Module):
         attn_output = (ops.batch_matmul(attn, V).transpose((1, 2)).reshape((B * T, d)) @ self.W_out).reshape(
             (B, T, self.W_out.shape[-1]))
         return attn_output, attn
+
+
 class Transformer_test(Module):
     def __init__(self, mask, heads, W_KQV, W_out, W_ff1, W_ff2, eps, device=None, dtype="float32"):
         super().__init__()
@@ -835,8 +847,8 @@ class Transformer_test(Module):
 
     def forward(self, X: Tensor) -> Tensor:
         Z = self.layer_norm(X + self.multihead_attention(X)[0])
-        B,T,d=Z.shape
-        rhs = (self.relu(Z.reshape((B*T, d)) @ self.W_ff1) @ self.W_ff2).reshape((B,T,d))
+        B, T, d = Z.shape
+        rhs = (self.relu(Z.reshape((B * T, d)) @ self.W_ff1) @ self.W_ff2).reshape((B, T, d))
         return self.layer_norm(Z + rhs)
 
 
@@ -844,6 +856,7 @@ class DotProductAttention(Module):
     """Scaled dot product attention.
 
     Defined in :numref:`subsec_batch_dot`"""
+
     def __init__(self, dropout, num_heads=None):
         super().__init__()
         self.dropout = Dropout(dropout)
@@ -863,7 +876,7 @@ class DotProductAttention(Module):
             mask_add = (~mask).astype(np.float32) * value
             mask_mul = Tensor(mask_mul, device=X.device, dtype=X.dtype)
             mask_add = Tensor(mask_add, device=X.device, dtype=X.dtype)
-            return X*mask_mul + mask_add
+            return X * mask_mul + mask_add
 
         if valid_lens is None:
             return ops.softmax(X)
@@ -878,6 +891,7 @@ class DotProductAttention(Module):
             # value, whose exponentiation outputs 0
             X = _sequence_mask(X.reshape((prod(shape[:-1]), shape[-1])), valid_lens, value=-1e6)
             return ops.softmax(X.reshape(shape))
+
     def forward(self, queries, keys, values, valid_lens=None,
                 window_mask=None):
         d = queries.shape[-1]
@@ -889,12 +903,13 @@ class DotProductAttention(Module):
             # Shape of window_mask: (num_windows, no. of queries,
             # no. of key-value pairs)
             scores = ops.reshape(
-                scores, (n//(num_windows*self.num_heads), num_windows,
+                scores, (n // (num_windows * self.num_heads), num_windows,
                          self.num_heads, num_queries, num_kv_pairs
-                        )) + ops.reshape(window_mask,(1,window_mask.shape[0],1)+window_mask.shape[1:])
+                         )) + ops.reshape(window_mask, (1, window_mask.shape[0], 1) + window_mask.shape[1:])
             scores = ops.reshape(scores, (n, num_queries, num_kv_pairs))
         self.attention_weights = self.masked_softmax(scores, valid_lens)
         return ops.bmm(self.dropout(self.attention_weights), values)
+
 
 class MultiHeadAttention(Module):
     """Multi-head attention.
@@ -964,6 +979,7 @@ class MultiHeadAttention(Module):
         X = X.permute((0, 2, 1, 3))
         return X.reshape((X.shape[0], X.shape[1], -1))
 
+
 class PositionWiseFFN(Module):
     def __init__(self, ffn_num_input, ffn_num_hiddens, ffn_num_outputs, device=None, dtype="float32"):
         super().__init__()
@@ -974,11 +990,13 @@ class PositionWiseFFN(Module):
     def forward(self, X: Tensor) -> Tensor:
         return self.dense2(self.relu(self.dense1(X)))
 
+
 class AddNorm(Module):
-    def __init__(self, eps=1e-5, dropout=0.5):
+    def __init__(self, dropout=0.5):
         super().__init__()
         self.dropout = Dropout(dropout)
-        self.ln = LayerNorm(eps)
+        self.ln = LayerNorm(eps=1e-5)
+
     def forward(self, X: Tensor, Y: Tensor) -> Tensor:
         # ###
         # import torch.nn as nn
@@ -991,13 +1009,15 @@ class AddNorm(Module):
         # ###
         return self.ln(self.dropout(Y) + X)
 
+
 class TransformerEncoderBlock_test(Module):
     """Transformer Encoder Block"""
+
     def __init__(self, mask, num_heads, W_KQV, W_out,
-                ffn_num_input, ffn_num_hiddens, num_hiddens,
+                 ffn_num_input, ffn_num_hiddens, num_hiddens,
                  eps, dropout, device=None, dtype="float32"):
         super().__init__()
-        self.attention = MultiheadAttention_test( mask, num_heads, W_KQV, W_out, device=device, dtype=dtype)
+        self.attention = MultiheadAttention_test(mask, num_heads, W_KQV, W_out, device=device, dtype=dtype)
         self.addnorm1 = AddNorm(eps, dropout)
         self.ffn = PositionWiseFFN(
             ffn_num_input, ffn_num_hiddens, num_hiddens, device=device, dtype=dtype)
@@ -1010,6 +1030,7 @@ class TransformerEncoderBlock_test(Module):
 
 class PositionalEncoding(Module):
     """Positional encoding."""
+
     def __init__(self, num_hiddens, dropout, max_len=1000):
         super().__init__()
         self.dropout = Dropout(dropout)
@@ -1021,14 +1042,16 @@ class PositionalEncoding(Module):
         self.P[:, :, 1::2] = np.cos(X)
 
     def forward(self, X):
-        P = Tensor(self.P[:, :X.shape[1], :], device=X.device, dtype=X.dtype)
+        P = Tensor(self.P[:, :X.shape[1], :], device=X.device, dtype=X.dtype, requires_grad=False)
         X = X + P
         return self.dropout(X)
 
+
 class TransformerEncoder_test(Encoder):
     """Transformer Encoder"""
+
     def __init__(self, vocab_size, num_hiddens, num_blks, mask, num_heads, W_KQV, W_out,
-                ffn_num_input, ffn_num_hiddens,
+                 ffn_num_input, ffn_num_hiddens,
                  eps, dropout, device=None, dtype="float32"):
         super().__init__()
         self.num_hiddens = num_hiddens
@@ -1038,8 +1061,8 @@ class TransformerEncoder_test(Encoder):
         for i in range(num_blks):
             self.blks.add_module(
                 TransformerEncoderBlock_test(mask, num_heads, W_KQV, W_out,
-                ffn_num_input, ffn_num_hiddens, num_hiddens,
-                 eps, dropout, device=device, dtype=dtype))
+                                             ffn_num_input, ffn_num_hiddens, num_hiddens,
+                                             eps, dropout, device=device, dtype=dtype))
 
     def forward(self, X, valid_lens, *args):
         # Since positional encoding values are between -1 and 1, the embedding
@@ -1052,3 +1075,39 @@ class TransformerEncoder_test(Encoder):
             self.attention_weights[
                 i] = blk.attention.attention_weights
         return X
+
+
+class TransformerEncoderBlock(Module):
+    """Transformer Encoder Block"""
+
+    def __init__(self, key_size, query_size, value_size, num_hiddens,
+                 ffn_num_input, ffn_num_hiddens, num_heads,
+                 dropout, use_bias=False, device=None, dtype="float32"):
+        super().__init__()
+        self.attention = MultiHeadAttention(
+            key_size, query_size, value_size, num_hiddens, num_heads, dropout,
+            bias=use_bias, device=device, dtype=dtype)
+        self.addnorm1 = AddNorm(dropout)
+        self.ffn = PositionWiseFFN(
+            ffn_num_input, ffn_num_hiddens, num_hiddens, device=device, dtype=dtype)
+        self.addnorm2 = AddNorm(dropout)
+        ###
+        # self.X = None
+        # self.attn = None
+        # self.Y = None
+        # self.res = None
+        # self.attn = None
+        # self.ffnY = None
+
+    def forward(self, X, valid_lens):
+        # self.X = X.numpy()
+        # attn = self.attention(X, X, X, valid_lens)
+        # self.attn = attn.numpy()
+        # Y = self.addnorm1(X, attn)
+        # self.Y = Y.numpy()
+        # ffnY = self.ffn(Y)
+        # self.ffnY = ffnY.numpy()
+        # res = self.addnorm2(Y, ffnY)
+        # self.res = res.numpy()
+        Y = self.addnorm1(X, self.attention(X, X, X, valid_lens))
+        return self.addnorm2(Y, self.ffn(Y))
