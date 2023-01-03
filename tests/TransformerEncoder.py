@@ -93,12 +93,20 @@ class PositionWiseFFN(nn.Module):
     def forward(self, X):
         return self.dense2(self.relu(self.dense1(X)))
 
+class LayerNorm(nn.Module):
+    """Residual connection followed by layer normalization."""
+    def __init__(self, eps=1e-5):
+        super().__init__()
+        self.eps = eps
+
+    def forward(self, Z):
+        return (Z - Z.mean(axis=-1, keepdims=True)) / torch.sqrt(Z.var(axis=-1, keepdims=True, unbiased=True) + self.eps)
 class AddNorm(nn.Module):
     """Residual connection followed by layer normalization."""
     def __init__(self, norm_shape, dropout):
         super().__init__()
         self.dropout = nn.Dropout(dropout)
-        self.ln = nn.LayerNorm(norm_shape)
+        self.ln = LayerNorm(eps=1e-5)
 
     def forward(self, X, Y):
         return self.ln(self.dropout(Y) + X)
@@ -140,7 +148,7 @@ class TransformerEncoder(d2l.Encoder):
     """Transformer Encoder"""
     def __init__(self, vocab_size, key_size, query_size, value_size,
                  num_hiddens, norm_shape, ffn_num_input, ffn_num_hiddens,
-                 num_heads, num_layers, dropout, use_bias=False, **kwargs):
+                 num_heads, num_layers=1, dropout=0, use_bias=False, **kwargs):
         super(TransformerEncoder, self).__init__(**kwargs)
         self.num_hiddens = num_hiddens
         self.embedding = nn.Embedding(vocab_size, num_hiddens)
@@ -155,6 +163,8 @@ class TransformerEncoder(d2l.Encoder):
         ### debug
         self.X = None
         self.ebd = None
+        self.X = []
+        self.y = []
 
     def forward(self, X, valid_lens, *args):
         # Since positional encoding values are between -1 and 1, the embedding
@@ -162,14 +172,16 @@ class TransformerEncoder(d2l.Encoder):
         # to rescale before they are summed up
         ebd = self.embedding(X)
         self.ebd = ebd.detach().numpy()
-
         X = self.pos_encoding(ebd * math.sqrt(self.num_hiddens))
+        self.X.append(X)
         ###
-        self.X = X.detach().numpy()
         ###
         self.attention_weights = [None] * len(self.blks)
+        X = X.type(torch.float32)
         for i, blk in enumerate(self.blks):
+            # self.X.append(X.detach().numpy())
             X = blk(X, valid_lens)
+            self.y.append(X.detach().numpy())
             self.attention_weights[
                 i] = blk.attention.attention.attention_weights
         return X
@@ -177,7 +189,7 @@ class TransformerEncoder(d2l.Encoder):
 
 use_bias = True
 dropout = 0
-num_layers = 5
+num_layers = 10
 device = ndl.cuda()
 
 encoder = TransformerEncoder(
@@ -225,15 +237,12 @@ x = torch.ones((2, 100), dtype=torch.long)
 x_ = ndl.Tensor(x.detach().numpy().astype(np.float32), device=device, dtype="float32")
 y = encoder(x, valid_lens)
 y_ = encoder_(x_, valid_lens_)
-print(y.shape)
-print(y_.shape)
+print("diff of y_({0}): {1}".format(y.shape, np.linalg.norm(y.detach().numpy() - y_.numpy())))
 
-for i in range(len(encoder.blks)):
-    print("---------------block %d-------------" % i)
-    encoder_blk = encoder.blks[i]
-    encoder_blk_ = encoder_.blks.modules[i]
+def check_weight(encoder_blk, encoder_blk_):
     # multiHeadAttention_weight
-    print("W_q: ", np.linalg.norm(encoder_blk.attention.W_q.weight.detach().numpy().T - encoder_blk_.attention.W_q.weight.numpy()))
+    print("W_q: ", np.linalg.norm(
+        encoder_blk.attention.W_q.weight.detach().numpy().T - encoder_blk_.attention.W_q.weight.numpy()))
     print("W_k: ", np.linalg.norm(
         encoder_blk.attention.W_k.weight.detach().numpy().T - encoder_blk_.attention.W_k.weight.numpy()))
     print("W_v: ", np.linalg.norm(
@@ -259,9 +268,45 @@ for i in range(len(encoder.blks)):
     print("dense2.bias: ", np.linalg.norm(
         encoder_blk.ffn.dense2.bias.detach().numpy() - encoder_blk_.ffn.dense2.bias.numpy()))
 
+for i in range(len(encoder.blks)):
+    print("----------------check weight----------------------")
+    print("---------------block %d-------------" % i)
+    encoder_blk = encoder.blks[i]
+    encoder_blk_ = encoder_.blks.modules[i]
+    check_weight(encoder_blk, encoder_blk_)
+
 print("------------------------------------")
 # print("TransformerEncoder.ebd:", np.linalg.norm(encoder.ebd - encoder_.ebd))
 # print("TransformerEncoder.X:", np.linalg.norm(encoder.X - encoder_.X))
-print("TransformerEncoder:", np.linalg.norm(y_.numpy()-y.detach().numpy()))
+# print("Norm diff of TransformerEncoder:", np.linalg.norm(y_.numpy()-y.detach().numpy()))
+# for i in range(len(encoder_.y)):
+#     print("diff of y_{0}({1}): {2}".format(i, encoder_.y[i].shape, np.linalg.norm(
+#         encoder.y[i] - encoder_.y[i])))
+#     print("diff of X_{0}({1}): {2}".format(i, encoder_.X[i].shape, np.linalg.norm(
+#         encoder.X[i].detach().numpy() - encoder_.X[i].numpy())))
+
 for i, weight in enumerate(encoder_.attention_weights):
-    print("weight_{0}: {1}".format(i, np.linalg.norm(weight.numpy() - encoder.attention_weights[i].detach().numpy())))
+    # print("-------------encoder_--------------")
+    # print(weight.numpy()[1,1])
+    # print("-------------encoder--------------")
+    # print(encoder.attention_weights[i].detach().numpy()[1, 1])
+    # print('----------------encoder---------------')
+    w = encoder.attention_weights[i].detach().numpy()
+    # print('----------------encoder_---------------')
+    w_ = weight.numpy()
+    print("diff of weight_{0}({1}): {2}".format(i, weight.shape, np.linalg.norm(w - w_)))
+
+
+
+# X = encoder.X[0].type(torch.float32)
+# X_ = encoder_.X[0]
+# # print(X)
+# # print(X_)
+# print("diff of X_[0]({0}): {1}".format(weight.shape, np.linalg.norm(X.detach().numpy() - X_.numpy())))
+
+# for idx, blk in enumerate(encoder_.blks.modules):
+#     # print("---------------block %d-------------" % idx)
+#     X_ = blk(X_, valid_lens_)
+#     X = encoder.blks[idx](X, valid_lens)
+#     # check_weight(encoder.blks[idx], blk)
+#     print("diff of y{0}({1}): {2}".format(idx, X.shape, np.linalg.norm(X.detach().numpy() - X_.numpy())))

@@ -263,9 +263,10 @@ class LayerNorm1d(Module):
 
 
 class LayerNorm(Module):
-    def __init__(self, eps=1e-5):
+    def __init__(self, eps=1e-5, unbiased=True):
         super().__init__()
         self.eps = eps
+        self.unbiased = unbiased
 
     def forward(self, Z: Tensor) -> Tensor:
         ### BEGIN YOUR SOLUTION
@@ -277,7 +278,7 @@ class LayerNorm(Module):
         # mean
         e = Z.sum(axes=(axis,)).reshape(Z.shape[:-1] + (1,)) / d
         # var
-        var = (((Z - e.broadcast_to(Z.shape)) ** 2).sum(axes=(axis,)) / d).reshape(Z.shape[:-1] + (1,))
+        var = (((Z - e.broadcast_to(Z.shape)) ** 2).sum(axes=(axis,)) / (d-1 if self.unbiased else d)).reshape(Z.shape[:-1] + (1,))
 
         a = (Z - e.broadcast_to(Z.shape))
         b = ((var.broadcast_to(Z.shape) + self.eps) ** 0.5)
@@ -992,10 +993,10 @@ class PositionWiseFFN(Module):
 
 
 class AddNorm(Module):
-    def __init__(self, dropout=0.5):
+    def __init__(self, dropout=0.5, eps=1e-5):
         super().__init__()
         self.dropout = Dropout(dropout)
-        self.ln = LayerNorm(eps=1e-5)
+        self.ln = LayerNorm(eps=eps)
 
     def forward(self, X: Tensor, Y: Tensor) -> Tensor:
         # ###
@@ -1091,7 +1092,7 @@ class TransformerEncoderBlock(Module):
         self.ffn = PositionWiseFFN(
             ffn_num_input, ffn_num_hiddens, num_hiddens, device=device, dtype=dtype)
         self.addnorm2 = AddNorm(dropout)
-        ###
+        ### debug
         # self.X = None
         # self.attn = None
         # self.Y = None
@@ -1100,6 +1101,7 @@ class TransformerEncoderBlock(Module):
         # self.ffnY = None
 
     def forward(self, X, valid_lens):
+        #### debug
         # self.X = X.numpy()
         # attn = self.attention(X, X, X, valid_lens)
         # self.attn = attn.numpy()
@@ -1109,6 +1111,9 @@ class TransformerEncoderBlock(Module):
         # self.ffnY = ffnY.numpy()
         # res = self.addnorm2(Y, ffnY)
         # self.res = res.numpy()
+        # return res
+        ####
+
         Y = self.addnorm1(X, self.attention(X, X, X, valid_lens))
         return self.addnorm2(Y, self.ffn(Y))
 
@@ -1117,7 +1122,7 @@ class TransformerEncoder(Encoder):
     """Transformer Encoder"""
     def __init__(self, vocab_size, key_size, query_size, value_size,
                  num_hiddens, ffn_num_input, ffn_num_hiddens,
-                 num_heads, num_layers, dropout, use_bias=False, device=None, dtype="float32"):
+                 num_heads, num_layers=1, dropout=0, use_bias=False, device=None, dtype="float32"):
         super().__init__()
         self.num_hiddens = num_hiddens
         self.embedding = Embedding(vocab_size, num_hiddens, device=device, dtype=dtype)
@@ -1129,14 +1134,22 @@ class TransformerEncoder(Encoder):
                               ffn_num_input, ffn_num_hiddens,
                              num_heads, dropout, use_bias, device=device, dtype=dtype))
         self.attention_weights = [None] * len(self.blks.modules)
+        self.X = []
+        self.y = []
 
     def forward(self, X, valid_lens):
         # Since positional encoding values are between -1 and 1, the embedding
         # values are multiplied by the square root of the embedding dimension
         # to rescale before they are summed up
+
         X = self.pos_encoding(self.embedding(X) * math.sqrt(self.num_hiddens))
-        y = self.blks(X, valid_lens)
+        self.X.append(X)
+        # y = self.blks(X, valid_lens)
         for i, blk in enumerate(self.blks.modules):
+            # self.X.append(X.numpy())
+            X = blk(X, valid_lens)
+            self.y.append(X.numpy())
+
             self.attention_weights[
                 i] = blk.attention.attention.attention_weights
-        return y
+        return X

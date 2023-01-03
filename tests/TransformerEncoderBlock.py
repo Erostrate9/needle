@@ -92,12 +92,21 @@ class PositionWiseFFN(nn.Module):
     def forward(self, X):
         return self.dense2(self.relu(self.dense1(X)))
 
+class LayerNorm(nn.Module):
+    """Residual connection followed by layer normalization."""
+    def __init__(self, eps=1e-5):
+        super().__init__()
+        self.eps = eps
+
+    def forward(self, Z):
+        return (Z - Z.mean(axis=-1, keepdims=True)) / torch.sqrt(Z.var(axis=-1, keepdims=True, unbiased=True) + self.eps)
+
 class AddNorm(nn.Module):
     """Residual connection followed by layer normalization."""
     def __init__(self, norm_shape, dropout):
         super().__init__()
         self.dropout = nn.Dropout(dropout)
-        self.ln = nn.LayerNorm(norm_shape)
+        self.ln = LayerNorm(eps=1e-5)
 
     def forward(self, X, Y):
         return self.ln(self.dropout(Y) + X)
@@ -134,9 +143,9 @@ class TransformerEncoderBlock(nn.Module):
         self.res = res.detach().numpy()
         return res
 
-use_bias = True
+use_bias = False
 dropout = 0
-X = torch.ones((2, 100, 24))
+X = torch.randn((2, 100, 24)).type(torch.float32)
 valid_lens = torch.tensor([3, 2])
 encoder_blk = TransformerEncoderBlock(24, 24, 24, 24, [100, 24], 24, 48, 8, dropout, use_bias=use_bias)
 # print(y.shape)
@@ -168,12 +177,14 @@ encoder_blk.ffn.dense1.bias = torch.nn.Parameter(torch.tensor(encoder_blk_.ffn.d
 encoder_blk.ffn.dense2.bias = torch.nn.Parameter(torch.tensor(encoder_blk_.ffn.dense2.bias.numpy(), dtype=torch.float32))
 encoder_blk.eval()
 
-y = encoder_blk(X, valid_lens)
-y_ = encoder_blk_(X_, valid_lens_)
-# print(y_.shape)
-# print("EncoderBlock.X", np.linalg.norm(encoder_blk.X - encoder_blk_.X))
-# print("EncoderBlock.attn", np.linalg.norm(encoder_blk.attn - encoder_blk_.attn))
-# print("EncoderBlock.Y", np.linalg.norm(encoder_blk.Y - encoder_blk_.Y))
-# print("EncoderBlock.ffnY", np.linalg.norm(encoder_blk.ffnY - encoder_blk_.ffnY))
-# print("EncoderBlock.res", np.linalg.norm(encoder_blk.res - encoder_blk_.res))
-print("EncoderBlock", np.linalg.norm(y_.numpy()-y.detach().numpy()))
+n = 5
+for i in range(n):
+    X = encoder_blk(X, valid_lens)
+    X_ = encoder_blk_(X_, valid_lens_)
+    # print(y_.shape)
+    # print("EncoderBlock.X", np.linalg.norm(encoder_blk.X - encoder_blk_.X))
+    # print("EncoderBlock.attn", np.linalg.norm(encoder_blk.attn - encoder_blk_.attn))
+    # print("EncoderBlock.Y", np.linalg.norm(encoder_blk.Y - encoder_blk_.Y))
+    # print("EncoderBlock.ffnY", np.linalg.norm(encoder_blk.ffnY - encoder_blk_.ffnY))
+    # print("EncoderBlock.res", np.linalg.norm(encoder_blk.res - encoder_blk_.res))
+    print("EncoderBlock", np.linalg.norm(X_.numpy()-X.detach().numpy()))
