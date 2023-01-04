@@ -781,3 +781,38 @@ class GetItem(TensorOp):
 
 def get_item(a, idxs):
     return GetItem(a.shape, idxs)(a)
+
+
+class Concat(TensorOp):
+    def __init__(self, axis: int):
+        self.axis = axis
+
+    def compute(self, tensors: tuple):
+        return array_api.concatenate(tensors, self.axis)
+
+    def gradient(self, out_grad, node):
+        out_shape = out_grad.shape
+        raw_indices = []
+        for i in range(len(out_shape) - 1):
+            raw_indices.append(slice(0, out_shape[i], 1))
+
+        start_idx = 0
+        grads = []
+        inputs, = node.inputs
+        for input in inputs:
+            indices = raw_indices.copy()
+            indices.insert(self.axis, slice(start_idx, start_idx + input.shape[self.axis], 1))
+            grads.append(out_grad[tuple(indices)])
+            start_idx += input.shape[self.axis]
+
+        return make_tuple(*grads)
+
+
+def cat(tensors, axis):
+    if isinstance(tensors, list):
+        tensors = make_tuple(*tensors)
+
+    if len(tensors) == 1:
+        return tensors[0]
+
+    return Concat(axis)(tensors)

@@ -777,6 +777,36 @@ def split(A, axis=0):
     return tuple(out)
 
 
+def concatenate(tensors: tuple, axis):
+    in_shape = tensors[0].shape
+    out_shape = list(in_shape)
+    out_shape[axis] = 0
+
+    for tensor in tensors:
+        # check shape
+        for i in range(len(tensor.shape)):
+            if i == axis:
+                out_shape[axis] += tensor.shape[i]
+            else:
+                assert tensor.shape[i] == in_shape[i], \
+                    f"shape on axis {i} must be eq, except shape on axis {axis}!"
+
+    res = empty(out_shape)
+    raw_idxs = []
+    for i in range(len(out_shape) - 1):
+        # build indexes
+        raw_idxs.append(slice(0, out_shape[i], 1))
+
+    start_idx = 0
+    for tensor in tensors:
+        indices = raw_idxs.copy()
+        indices.insert(axis, slice(start_idx, start_idx + tensor.shape[axis], 1))
+        res[tuple(indices)] = tensor
+        start_idx += tensor.shape[axis]
+
+    # return
+    return res
+
 def pad(A, axes):
     return A.pad(axes)
 

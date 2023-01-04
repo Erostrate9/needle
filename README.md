@@ -1,2 +1,2 @@
-# Homework 4
-Public repository and stub/testing code for Homework 4 of 10-714.
+# Final Project - Transformer implementation
+Public repository and stub/testing code for Final Project of 10-714.

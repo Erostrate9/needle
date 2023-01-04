@@ -186,6 +186,45 @@ class TransformerEncoder(d2l.Encoder):
                 i] = blk.attention.attention.attention_weights
         return X
 
+def set_encoder_blk(encoder_blk, encoder_blk_, use_bias=True):
+    # multiHeadAttention_weight
+    encoder_blk.attention.W_q.weight = torch.nn.Parameter(
+        torch.tensor(encoder_blk_.attention.W_q.weight.numpy().T, dtype=torch.float32))
+    encoder_blk.attention.W_k.weight = torch.nn.Parameter(
+        torch.tensor(encoder_blk_.attention.W_k.weight.numpy().T, dtype=torch.float32))
+    encoder_blk.attention.W_v.weight = torch.nn.Parameter(
+        torch.tensor(encoder_blk_.attention.W_v.weight.numpy().T, dtype=torch.float32))
+    encoder_blk.attention.W_o.weight = torch.nn.Parameter(
+        torch.tensor(encoder_blk_.attention.W_o.weight.numpy().T, dtype=torch.float32))
+    if use_bias:
+        encoder_blk.attention.W_q.bias = torch.nn.Parameter(
+            torch.tensor(encoder_blk_.attention.W_q.bias.numpy(), dtype=torch.float32))
+        encoder_blk.attention.W_k.bias = torch.nn.Parameter(
+            torch.tensor(encoder_blk_.attention.W_k.bias.numpy(), dtype=torch.float32))
+        encoder_blk.attention.W_v.bias = torch.nn.Parameter(
+            torch.tensor(encoder_blk_.attention.W_v.bias.numpy(), dtype=torch.float32))
+        encoder_blk.attention.W_o.bias = torch.nn.Parameter(
+            torch.tensor(encoder_blk_.attention.W_o.bias.numpy(), dtype=torch.float32))
+    # ffn_weight
+    encoder_blk.ffn.dense1.weight = torch.nn.Parameter(
+        torch.tensor(encoder_blk_.ffn.dense1.weight.numpy().T, dtype=torch.float32))
+    encoder_blk.ffn.dense2.weight = torch.nn.Parameter(
+        torch.tensor(encoder_blk_.ffn.dense2.weight.numpy().T, dtype=torch.float32))
+    encoder_blk.ffn.dense1.bias = torch.nn.Parameter(
+        torch.tensor(encoder_blk_.ffn.dense1.bias.numpy(), dtype=torch.float32))
+    encoder_blk.ffn.dense2.bias = torch.nn.Parameter(
+        torch.tensor(encoder_blk_.ffn.dense2.bias.numpy(), dtype=torch.float32))
+
+def set_encoder(encoder, encoder_, use_bias=True):
+    # encoder: pytorch TransformerEncoder
+    # encoder_: needle TransformerEncoder
+    for i in range(len(encoder.blks)):
+        encoder_blk = encoder.blks[i]
+        encoder_blk_ = encoder_.blks.modules[i]
+        # multiHeadAttention_weight
+        set_encoder_blk(encoder_blk, encoder_blk_, use_bias=use_bias)
+    encoder.embedding.weight = torch.nn.Parameter(torch.tensor(encoder_.embedding.weight.numpy(), dtype=torch.float32))
+
 
 use_bias = True
 dropout = 0
@@ -203,32 +242,35 @@ valid_lens = torch.tensor([3, 2])
 # print(y.shape)
 valid_lens_ = valid_lens.detach().numpy()
 
-for i in range(len(encoder.blks)):
-    encoder_blk = encoder.blks[i]
-    encoder_blk_ = encoder_.blks.modules[i]
-    # multiHeadAttention_weight
-    encoder_blk.attention.W_q.weight = torch.nn.Parameter(torch.tensor(encoder_blk_.attention.W_q.weight.numpy().T, dtype=torch.float32))
-    encoder_blk.attention.W_k.weight = torch.nn.Parameter(torch.tensor(encoder_blk_.attention.W_k.weight.numpy().T, dtype=torch.float32))
-    encoder_blk.attention.W_v.weight = torch.nn.Parameter(torch.tensor(encoder_blk_.attention.W_v.weight.numpy().T, dtype=torch.float32))
-    encoder_blk.attention.W_o.weight = torch.nn.Parameter(torch.tensor(encoder_blk_.attention.W_o.weight.numpy().T, dtype=torch.float32))
-    if use_bias:
-        encoder_blk.attention.W_q.bias = torch.nn.Parameter(
-            torch.tensor(encoder_blk_.attention.W_q.bias.numpy(), dtype=torch.float32))
-        encoder_blk.attention.W_k.bias = torch.nn.Parameter(
-            torch.tensor(encoder_blk_.attention.W_k.bias.numpy(), dtype=torch.float32))
-        encoder_blk.attention.W_v.bias = torch.nn.Parameter(
-            torch.tensor(encoder_blk_.attention.W_v.bias.numpy(), dtype=torch.float32))
-        encoder_blk.attention.W_o.bias = torch.nn.Parameter(
-            torch.tensor(encoder_blk_.attention.W_o.bias.numpy(), dtype=torch.float32))
-    # ffn_weight
-    encoder_blk.ffn.dense1.weight = torch.nn.Parameter(torch.tensor(encoder_blk_.ffn.dense1.weight.numpy().T, dtype=torch.float32))
-    encoder_blk.ffn.dense2.weight = torch.nn.Parameter(torch.tensor(encoder_blk_.ffn.dense2.weight.numpy().T, dtype=torch.float32))
-    encoder_blk.ffn.dense1.bias = torch.nn.Parameter(torch.tensor(encoder_blk_.ffn.dense1.bias.numpy(), dtype=torch.float32))
-    encoder_blk.ffn.dense2.bias = torch.nn.Parameter(torch.tensor(encoder_blk_.ffn.dense2.bias.numpy(), dtype=torch.float32))
-print("encoder.embedding.weight.shape:", encoder.embedding.weight.shape)
-print("encoder_.embedding.weight.shape:", encoder_.embedding.weight.shape)
-encoder.embedding.weight = torch.nn.Parameter(torch.tensor(encoder_.embedding.weight.numpy(), dtype=torch.float32))
+set_encoder(encoder, encoder_, use_bias=use_bias)
 
+# for i in range(len(encoder.blks)):
+#     encoder_blk = encoder.blks[i]
+#     encoder_blk_ = encoder_.blks.modules[i]
+#     # multiHeadAttention_weight
+#     encoder_blk.attention.W_q.weight = torch.nn.Parameter(torch.tensor(encoder_blk_.attention.W_q.weight.numpy().T, dtype=torch.float32))
+#     encoder_blk.attention.W_k.weight = torch.nn.Parameter(torch.tensor(encoder_blk_.attention.W_k.weight.numpy().T, dtype=torch.float32))
+#     encoder_blk.attention.W_v.weight = torch.nn.Parameter(torch.tensor(encoder_blk_.attention.W_v.weight.numpy().T, dtype=torch.float32))
+#     encoder_blk.attention.W_o.weight = torch.nn.Parameter(torch.tensor(encoder_blk_.attention.W_o.weight.numpy().T, dtype=torch.float32))
+#     if use_bias:
+#         encoder_blk.attention.W_q.bias = torch.nn.Parameter(
+#             torch.tensor(encoder_blk_.attention.W_q.bias.numpy(), dtype=torch.float32))
+#         encoder_blk.attention.W_k.bias = torch.nn.Parameter(
+#             torch.tensor(encoder_blk_.attention.W_k.bias.numpy(), dtype=torch.float32))
+#         encoder_blk.attention.W_v.bias = torch.nn.Parameter(
+#             torch.tensor(encoder_blk_.attention.W_v.bias.numpy(), dtype=torch.float32))
+#         encoder_blk.attention.W_o.bias = torch.nn.Parameter(
+#             torch.tensor(encoder_blk_.attention.W_o.bias.numpy(), dtype=torch.float32))
+#     # ffn_weight
+#     encoder_blk.ffn.dense1.weight = torch.nn.Parameter(torch.tensor(encoder_blk_.ffn.dense1.weight.numpy().T, dtype=torch.float32))
+#     encoder_blk.ffn.dense2.weight = torch.nn.Parameter(torch.tensor(encoder_blk_.ffn.dense2.weight.numpy().T, dtype=torch.float32))
+#     encoder_blk.ffn.dense1.bias = torch.nn.Parameter(torch.tensor(encoder_blk_.ffn.dense1.bias.numpy(), dtype=torch.float32))
+#     encoder_blk.ffn.dense2.bias = torch.nn.Parameter(torch.tensor(encoder_blk_.ffn.dense2.bias.numpy(), dtype=torch.float32))
+# print("encoder.embedding.weight.shape:", encoder.embedding.weight.shape)
+# print("encoder_.embedding.weight.shape:", encoder_.embedding.weight.shape)
+# encoder.embedding.weight = torch.nn.Parameter(torch.tensor(encoder_.embedding.weight.numpy(), dtype=torch.float32))
+# encoder.dense.weight = torch.nn.Parameter(torch.tensor(encoder_.dense.weight.numpy().T, dtype=torch.float32))
+# encoder.dense.bias = torch.nn.Parameter(torch.tensor(encoder_.dense.bias.numpy(), dtype=torch.float32))
 
 encoder.eval()
 encoder_.eval()

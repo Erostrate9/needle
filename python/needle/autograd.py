@@ -394,6 +394,16 @@ class Tensor(Value):
     def undilate(self, axes, dilation):
         return needle.ops.Undilate(axes, dilation)(self)
 
+    def cat(self, tensors, axis):
+        if isinstance(tensors, list):
+            tensors.append(self)
+        elif isinstance(tensors, tuple):
+            tensors = list(tensors)
+            tensors.append(self)
+        elif isinstance(tensors, Tensor):
+            tensors = [self, tensors]
+        return needle.ops.cat(tensors, axis)
+
     __radd__ = __add__
     __rmul__ = __mul__
     __rmatmul__ = __matmul__

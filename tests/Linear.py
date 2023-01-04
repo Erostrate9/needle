@@ -11,14 +11,16 @@ batch_size = 2
 num_queries = 4
 query_size = 100
 num_hiddens = 100
-bias = False
+bias = True
 
 X = torch.ones((batch_size, num_queries, num_hiddens),dtype=torch.float32)
 X_ = ndl.Tensor(X.detach().numpy(), device=ndl.cpu(), dtype="float32")
 
 W_q = nn.Linear(query_size, num_hiddens, bias=bias)
 W_q_ = ndl.nn.Linear(query_size, num_hiddens, bias=bias, device=ndl.cpu(), dtype="float32")
-W_q.weight = torch.nn.Parameter(torch.tensor(W_q_.weight.numpy(), dtype=torch.float32))
+W_q.weight = torch.nn.Parameter(torch.tensor(W_q_.weight.numpy().T, dtype=torch.float32))
+W_q.bias = torch.nn.Parameter(torch.tensor(W_q_.bias.numpy(), dtype=torch.float32))
+
 
 
 y = W_q(X)

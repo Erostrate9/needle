@@ -85,16 +85,18 @@ class MultiHeadAttention(nn.Module):
 num_hiddens, num_heads = 100, 5
 
 batch_size, num_queries = 2, 4
-num_kvpairs, valid_lens =  6, torch.tensor([3, 2])
-X = torch.ones((batch_size, num_queries, num_hiddens),dtype=torch.float32)
-Y = torch.ones((batch_size, num_kvpairs, num_hiddens),dtype=torch.float32)
+num_kvpairs =  6
+valid_lens = torch.tensor([3, 2])
+# valid_lens = None
+X = torch.randn((batch_size, num_queries, num_hiddens),dtype=torch.float32)
+Y = torch.randn((batch_size, num_kvpairs, num_hiddens),dtype=torch.float32)
 # d2l.check_shape(attention(X, Y, Y, valid_lens),
 #                 (batch_size, num_queries, num_hiddens))
 dropout = 0
 
 attention_ = ndl.nn.MultiHeadAttention(num_hiddens, num_hiddens, num_hiddens,
                                        num_hiddens, num_heads, dropout, device=ndl.cpu(), dtype="float32")
-valid_lens_ = valid_lens.detach().numpy()
+valid_lens_ = valid_lens.detach().numpy() if valid_lens is not None else None
 X_ = ndl.Tensor(X.detach().numpy(), device=ndl.cpu(), dtype="float32")
 Y_ = ndl.Tensor(Y.detach().numpy(), device=ndl.cpu(), dtype="float32")
 
@@ -161,6 +163,7 @@ print("attn_output.shape:", y.shape)
 y_ = attention_(X_, Y_, Y_, valid_lens_)
 print("attn_output_.shape:", y_.shape)
 
-print("valid_lens:", np.linalg.norm(attention.vl.detach().numpy()-attention_.vl))
+if (valid_lens is not None):
+    print("valid_lens:", np.linalg.norm(attention.vl.detach().numpy()-attention_.vl))
 print("output:", np.linalg.norm(attention.output.detach().numpy()-attention_.output.numpy()))
 print("attn_output:", np.linalg.norm(y.detach().numpy()-y_.numpy()))

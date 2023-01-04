@@ -167,6 +167,9 @@ class Sequential(Module):
 
 
 class SoftmaxLoss(Module):
+    def __init__(self, reduction='mean'):
+        self.reduction = reduction
+
     def forward(self, logits: Tensor, y: Tensor):
         ### BEGIN YOUR SOLUTION
         # n: batch_num; k: class_num
@@ -175,9 +178,39 @@ class SoftmaxLoss(Module):
         # axes=(1,)
         logsumexp = ops.logsumexp(logits, axes=(1,))
         z_y = (logits * y_one_hot).sum(axes=(1,))
-        return (logsumexp - z_y).sum() / n
+        if self.reduction == 'none':
+            return (logsumexp - z_y)
+        elif self.reduction == 'sum':
+            return (logsumexp - z_y).sum()
+        else:
+            # mean
+            return (logsumexp - z_y).sum() / n
         ### END YOUR SOLUTION
 
+class MaskedSoftmaxCELoss(SoftmaxLoss):
+    """The softmax cross-entropy loss with masks.
+
+    Defined in :numref:`sec_seq2seq_decoder`"""
+    # `pred` shape: (`batch_size`, `num_steps`, `vocab_size`)
+    # `label` shape: (`batch_size`, `num_steps`)
+    # `valid_len` shape: (`batch_size`,)
+    def _sequence_mask(self, X: Tensor, valid_lens, value=0):
+        # X: n * d
+        maxlen = X.shape[-1]
+        mask = (torch.arange((maxlen), dtype=torch.float32)[None, :].numpy() < valid_lens[:, None])
+        mask_mul = mask.astype(np.float32)
+        mask_add = (~mask).astype(np.float32) * value
+        mask_mul = Tensor(mask_mul, device=X.device, dtype=X.dtype, requires_grad=False)
+        mask_add = Tensor(mask_add, device=X.device, dtype=X.dtype, requires_grad=False)
+        return X * mask_mul + mask_add
+    def forward(self, pred, label, valid_len):
+        weights = torch.ones_like(label)
+        weights = self._sequence_mask(weights, valid_len)
+        self.reduction='none'
+        unweighted_loss = super(MaskedSoftmaxCELoss, self).forward(
+            pred.permute((0, 2, 1)), label)
+        weighted_loss = (unweighted_loss * weights).mean(dim=1)
+        return weighted_loss
 
 class BatchNorm1d(Module):
     def __init__(self, dim, eps=1e-5, momentum=0.1, device=None, dtype="float32"):
@@ -770,6 +803,17 @@ class Decoder(Module):
     def forward(self, X, state):
         raise NotImplementedError
 
+class AttentionDecoder(Decoder):
+    """The base attention-based decoder interface.
+
+    Defined in :numref:`sec_seq2seq_attention`"""
+    def __init__(self):
+        super().__init__()
+
+    @property
+    def attention_weights(self):
+        raise NotImplementedError
+
 
 class EncoderDecoder(Module):
     """The base class for the encoder-decoder architecture."""
@@ -778,10 +822,17 @@ class EncoderDecoder(Module):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
+        # debug
+        self.enc_outputs = None
+        self.dec_state = None
 
     def forward(self, enc_X, dec_X, *args):
         enc_outputs = self.encoder(enc_X, *args)
         dec_state = self.decoder.init_state(enc_outputs, *args)
+
+        # debug
+        self.enc_outputs = enc_outputs
+        self.dec_state = dec_state
         return self.decoder(dec_X, dec_state)
 
 
@@ -858,10 +909,9 @@ class DotProductAttention(Module):
 
     Defined in :numref:`subsec_batch_dot`"""
 
-    def __init__(self, dropout, num_heads=None):
+    def __init__(self, dropout):
         super().__init__()
         self.dropout = Dropout(dropout)
-        self.num_heads = num_heads  # To be covered later
 
     # Shape of queries: (batch_size, no. of queries, d)
     # Shape of keys: (batch_size, no. of key-value pairs, d)
@@ -893,21 +943,10 @@ class DotProductAttention(Module):
             X = _sequence_mask(X.reshape((prod(shape[:-1]), shape[-1])), valid_lens, value=-1e6)
             return ops.softmax(X.reshape(shape))
 
-    def forward(self, queries, keys, values, valid_lens=None,
-                window_mask=None):
+    def forward(self, queries, keys, values, valid_lens=None):
         d = queries.shape[-1]
         # Swap the last two dimensions of keys with keys.transpose(1, 2)
-        scores = ops.batch_matmul(queries, keys.transpose((1, 2))) / math.sqrt(d)
-        if window_mask is not None:  # To be covered later
-            num_windows = window_mask.shape[0]
-            n, num_queries, num_kv_pairs = scores.shape
-            # Shape of window_mask: (num_windows, no. of queries,
-            # no. of key-value pairs)
-            scores = ops.reshape(
-                scores, (n // (num_windows * self.num_heads), num_windows,
-                         self.num_heads, num_queries, num_kv_pairs
-                         )) + ops.reshape(window_mask, (1, window_mask.shape[0], 1) + window_mask.shape[1:])
-            scores = ops.reshape(scores, (n, num_queries, num_kv_pairs))
+        scores = ops.bmm(queries, keys.transpose((1, 2))) / math.sqrt(d)
         self.attention_weights = self.masked_softmax(scores, valid_lens)
         return ops.bmm(self.dropout(self.attention_weights), values)
 
@@ -927,10 +966,13 @@ class MultiHeadAttention(Module):
         self.W_v = Linear(value_size, num_hiddens, bias=bias, device=device, dtype=dtype)
         self.W_o = Linear(num_hiddens, num_hiddens, bias=bias, device=device, dtype=dtype)
         ### test
+        self.X1 = None
+        self.X2 = None
+        self.X3 = None
         self.vl = None
         self.output = None
 
-    def forward(self, queries, keys, values, valid_lens, window_mask=None):
+    def forward(self, queries, keys, values, valid_lens):
         # Shape of queries, keys, or values:
         # (batch_size, no. of queries or key-value pairs, num_hiddens)
         # Shape of valid_lens: (batch_size,) or (batch_size, no. of queries)
@@ -940,7 +982,11 @@ class MultiHeadAttention(Module):
         queries = self.transpose_qkv(self.W_q(queries))
         keys = self.transpose_qkv(self.W_k(keys))
         values = self.transpose_qkv(self.W_v(values))
-
+        # debug
+        self.X1 = queries
+        self.X2 = keys
+        self.X3 = values
+        #
         if valid_lens is not None:
             # On axis 0, copy the first item (scalar or vector) for num_heads
             # times, then copy the next item, and so on
@@ -949,8 +995,8 @@ class MultiHeadAttention(Module):
         # Shape of output: (batch_size * num_heads, no. of queries,
         # num_hiddens / num_heads)
         self.vl = valid_lens
-        output = self.attention(queries, keys, values, valid_lens,
-                                window_mask)
+        # print("valid_lens", valid_lens)
+        output = self.attention(queries, keys, values, valid_lens)
         self.output = output
         # Shape of output_concat: (batch_size, no. of queries, num_hiddens)
         output_concat = self.transpose_output(output)
@@ -1032,7 +1078,7 @@ class TransformerEncoderBlock_test(Module):
 class PositionalEncoding(Module):
     """Positional encoding."""
 
-    def __init__(self, num_hiddens, dropout, max_len=1000):
+    def                                 __init__(self, num_hiddens, dropout, max_len=1000):
         super().__init__()
         self.dropout = Dropout(dropout)
         # Create a long enough P
@@ -1153,3 +1199,119 @@ class TransformerEncoder(Encoder):
             self.attention_weights[
                 i] = blk.attention.attention.attention_weights
         return X
+
+
+class TransformerDecoderBlock(Module):
+    # The i-th block in the Transformer decoder
+    def __init__(self, key_size, query_size, value_size, num_hiddens,
+                ffn_num_input, ffn_num_hiddens, num_heads,
+                 dropout, i, use_bias=True, device=None, dtype="float32"):
+        super().__init__()
+        self.i = i
+        self.attention1 = MultiHeadAttention(
+            key_size, query_size, value_size, num_hiddens, num_heads, dropout,
+            bias=use_bias, device=device, dtype=dtype)
+        self.addnorm1 = AddNorm(dropout)
+        self.attention2 = MultiHeadAttention(
+            key_size, query_size, value_size, num_hiddens, num_heads, dropout,
+            bias=use_bias, device=device, dtype=dtype)
+        self.addnorm2 = AddNorm(dropout)
+        self.ffn = PositionWiseFFN(
+            ffn_num_input, ffn_num_hiddens, num_hiddens, device=device, dtype=dtype)
+        self.addnorm3 = AddNorm(dropout)
+        # debug
+        self.X = None
+        self.enc_outputs = None
+        self.enc_valid_lens = None
+        self.X2 = None
+        self.Y = None
+        self.Y2 = None
+        self.Z = None
+        self.key_values = None
+        self.dec_valid_lens = None
+
+    def forward(self, X, state):
+            enc_outputs, enc_valid_lens = state[0], state[1]
+            # During training, all the tokens of any output sequence are processed
+            # at the same time, so state[2][self.i] is None as initialized. When
+            # decoding any output sequence token by token during prediction,
+            # state[2][self.i] contains representations of the decoded output at
+            # the i-th block up to the current time step
+            if state[2][self.i] is None:
+                key_values = X
+            else:
+                key_values = ops.cat([state[2][self.i], X], axis=1)
+            state[2][self.i] = key_values
+            if self.training:
+                batch_size, num_steps, _ = X.shape
+                # Shape of dec_valid_lens: (batch_size, num_steps), where every
+                # row is [1, 2, ..., num_steps]
+                dec_valid_lens = np.tile(np.arange(1, num_steps + 1), (batch_size, 1))
+            else:
+                dec_valid_lens = None
+            # Self-attention
+            X2 = self.attention1(X, key_values, key_values, dec_valid_lens)
+            Y = self.addnorm1(X, X2)
+            # Encoder-decoder attention. Shape of enc_outputs:
+            # (batch_size, num_steps, num_hiddens)
+            Y2 = self.attention2(Y, enc_outputs, enc_outputs, enc_valid_lens)
+            Z = self.addnorm2(Y, Y2)
+            # debug
+            self.X = X
+            self.enc_outputs = enc_outputs
+            self.enc_valid_lens = enc_valid_lens
+            self.key_values = key_values
+            self.dec_valid_lens = dec_valid_lens
+            self.X2 = X2
+            self.Y = Y
+            self.Y2 = Y2
+            self.Z = Z
+            return self.addnorm3(Z, self.ffn(Z)), state
+
+class TransformerDecoder(AttentionDecoder):
+    def __init__(self, vocab_size, key_size, query_size, value_size,
+                 num_hiddens, ffn_num_input, ffn_num_hiddens,
+                 num_heads, num_layers, dropout, use_bias=True, device=None, dtype="float32"):
+        super().__init__()
+        self.num_hiddens = num_hiddens
+        self.num_layers = num_layers
+        self.embedding = Embedding(vocab_size, num_hiddens, device=device, dtype=dtype)
+        self.pos_encoding = PositionalEncoding(num_hiddens, dropout)
+        self.blks = Sequential()
+
+        for i in range(num_layers):
+            self.blks.add_module(
+                TransformerDecoderBlock(key_size, query_size, value_size, num_hiddens,
+                                        ffn_num_input, ffn_num_hiddens,
+                                        num_heads, dropout, i, use_bias, device=device, dtype=dtype))
+        self.dense = Linear(num_hiddens, vocab_size, bias=True, device=device, dtype=dtype)
+        # debug
+        self.X = []
+        self.state = []
+
+    def init_state(self, enc_outputs, enc_valid_lens, *args):
+        return [enc_outputs, enc_valid_lens, [None] * self.num_layers]
+
+    def forward(self, X, state):
+        X = self.pos_encoding(self.embedding(X) * math.sqrt(self.num_hiddens))
+        self._attention_weights = [[None] * len(self.blks.modules) for _ in range (2)]
+        ##
+        self.X.append(X)
+        ##
+        for i, blk in enumerate(self.blks.modules):
+            X, state = blk(X, state)
+            ##
+            self.X.append(X)
+            self.state.append(state)
+            ##
+            # 解码器自注意力权重
+            self._attention_weights[0][
+                i] = blk.attention1.attention.attention_weights
+            # “编码器－解码器”自注意力权重
+            self._attention_weights[1][
+                i] = blk.attention2.attention.attention_weights
+        return self.dense(X), state
+
+    @property
+    def attention_weights(self):
+        return self._attention_weights
