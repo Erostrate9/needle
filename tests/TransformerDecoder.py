@@ -452,7 +452,6 @@ def check_weight(decoder_blk, decoder_blk_):
         decoder_blk.ffn.dense2.bias.detach().numpy() - decoder_blk_.ffn.dense2.bias.numpy()))
 
 
-
 use_bias = True
 device_ = ndl.cuda()
 num_hiddens, num_layers, dropout, batch_size, num_steps = 32, 2, 0, 64, 10
@@ -500,6 +499,8 @@ net = EncoderDecoder(encoder, decoder)
 net_ = ndl.nn.EncoderDecoder(encoder_, decoder_)
 
 train_iter, src_vocab, tgt_vocab = d2l.load_data_nmt(batch_size, num_steps)
+loss = d2l.MaskedSoftmaxCELoss()
+loss_ = ndl.nn.MaskedSoftmaxCELoss()
 
 for idx, batch in enumerate(train_iter):
     X, X_valid_len, Y, Y_valid_len = [x.to(device) for x in batch]
@@ -514,10 +515,13 @@ for idx, batch in enumerate(train_iter):
     dec_input_ = to_ndl(dec_input, device=device_)
     Y_hat_, __ = net_(X_, dec_input_, X_valid_len_)
     print(Y_hat_.shape)
-
     # print('diff of enc_outputs: ', np.linalg.norm(net.enc_outputs.detach().numpy() - net_.enc_outputs.numpy()))
     # print('diff of dec_state[0]: ', np.linalg.norm(net.dec_state[0].detach().numpy() - net_.dec_state[0].numpy()))
     print('batch{0}, diff of Y_hat: {1}'.format(idx, np.linalg.norm(Y_hat.detach().to(torch.device('cpu')).numpy() - Y_hat_.numpy())) )
+    l = loss(Y_hat, Y, Y_valid_len)
+    l_ = loss_(Y_hat_, Y_, Y_valid_len_)
+    print('batch{0}, diff of loss: {1}'.format(idx, np.linalg.norm(
+        l.detach().to(torch.device('cpu')).numpy() - l_.numpy())))
     # for i in range(len(net.decoder.X)):
     #     print('diff of X_{0}: {1}'.format(i, np.linalg.norm(net.decoder.X[i].detach().numpy() - net_.decoder.X[i].numpy())) )
     # break
