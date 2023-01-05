@@ -367,6 +367,9 @@ class Tensor(Value):
     def sum(self, axes=None):
         return needle.ops.Summation(axes)(self)
 
+    def max(self, axes=None):
+        return needle.ops.Max(axes)(self)
+
     def broadcast_to(self, shape):
         return needle.ops.BroadcastTo(shape)(self)
 

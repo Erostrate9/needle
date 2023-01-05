@@ -287,12 +287,16 @@ def broadcast_to(a, shape):
 
 class Summation(TensorOp):
     def __init__(self, axes: Optional[tuple] = None):
+        if isinstance(axes, int):
+            axes = (axes, )
         self.axes = axes
 
     def compute(self, a):
         ### BEGIN YOUR SOLUTION
         if isinstance(self.axes, (tuple, list)):
-            for i in self.axes:
+            axes = tuple(map(lambda n: len(a.shape)+n if n<0 else n, self.axes)) if self.axes is not None else tuple(range(len(a.shape)))
+            axes = tuple(reversed(axes))
+            for i in axes:
                 a = a.sum(i)
             return a
         else:
@@ -301,15 +305,16 @@ class Summation(TensorOp):
 
     def gradient(self, out_grad, node):
         ### BEGIN YOUR SOLUTION
-        in_shape = tuple(node.inputs[0].shape)
+        input = node.inputs[0]
+        in_shape = tuple(input.shape)
         out_shape = list(in_shape)
         if self.axes is None:
-            out_shape = [1 for i in range(len(out_shape))]
+            out_shape = [1 for _ in range(len(out_shape))]
         elif isinstance(self.axes, int):
             out_shape[self.axes] = 1
         else:
             for axis in self.axes:
-                if axis < len(out_shape):
+                if axis < len(out_shape) and axis >= -len(out_shape):
                     out_shape[axis] = 1
         return out_grad.reshape(out_shape).broadcast_to(in_shape)
         ### END YOUR SOLUTION
@@ -516,25 +521,60 @@ class LogSumExp(TensorOp):
 def logsumexp(a, axes=None):
     return LogSumExp(axes=axes)(a)
 
-class Softmax(TensorOp):
-    def compute(self, Z):
+# class Softmax(TensorOp):
+#     def compute(self, Z):
+#         ### BEGIN YOUR SOLUTION
+#         max_z = array_api.max(Z, axis=len(Z.shape)-1, keepdims=True)
+#         Z = array_api.exp(Z - max_z.broadcast_to(Z.shape))
+#         return (Z / Z.sum(axis=len(Z.shape)-1, keepdims=True).broadcast_to(Z.shape)).compact()
+#         ### END YOUR SOLUTION
+#
+#     def gradient(self, out_grad, node):
+#         ### BEGIN YOUR SOLUTION
+#         input = node.inputs[0]
+#         hx = softmax(input)
+#         ones = init.ones_like(hx)
+#         return out_grad.broadcast_to(input.shape) * hx * (ones-hx)
+#         ### END YOUR SOLUTION
+# def softmax(Z):
+#     return Softmax()(Z)
+class Max(TensorOp):
+    def __init__(self, axes: Optional[tuple] = None):
+        if isinstance(axes, int):
+            axes = (axes, )
+        self.axes = axes
+
+    def compute(self, a):
         ### BEGIN YOUR SOLUTION
-        max_z = array_api.max(Z, axis=len(Z.shape)-1, keepdims=True)
-        Z = array_api.exp(Z - max_z.broadcast_to(Z.shape))
-        return (Z / Z.sum(axis=len(Z.shape)-1, keepdims=True).broadcast_to(Z.shape)).compact()
+        axes = tuple(map(lambda n: len(a.shape)+n if n<0 else n, self.axes)) if self.axes is not None else tuple(range(len(a.shape)))
+        axes = tuple(reversed(axes))
+        for i in axes:
+            a = a.max(i)
+        return a
         ### END YOUR SOLUTION
 
     def gradient(self, out_grad, node):
         ### BEGIN YOUR SOLUTION
         input = node.inputs[0]
-        hx = softmax(input)
-        ones = init.ones_like(hx)
-        return out_grad.broadcast_to(input.shape) * hx * (ones-hx)
+        in_shape = tuple(input.shape)
+        out_shape = list(in_shape)
+        if self.axes is None:
+            out_shape = [1 for _ in range(len(out_shape))]
+        elif isinstance(self.axes, int):
+            out_shape[self.axes] = 1
+        else:
+            for axis in self.axes:
+                if axis < len(out_shape) and axis >= -len(out_shape):
+                    out_shape[axis] = 1
+        out_grad = out_grad.reshape(out_shape).broadcast_to(in_shape)
+        x_max = numpy.broadcast_to(max(input, self.axes).numpy().reshape(out_shape), in_shape)
+        mask = (input.numpy() == x_max).astype(numpy.float32)
+        mask = Tensor(mask, device=out_grad.device, dtype=out_grad.dtype)
+        return out_grad * mask
         ### END YOUR SOLUTION
 
-def softmax(Z):
-    return Softmax()(Z)
-
+def max(a, axes=None):
+    return Max(axes)(a)
 
 class Tanh(TensorOp):
     def compute(self, a):

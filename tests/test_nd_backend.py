@@ -234,6 +234,20 @@ def test_summation_backward(shape, axes, device):
     A = ndl.Tensor(nd.array(_A), device=device)
     backward_check(ndl.summation, A, axes=axes)
 
+@pytest.mark.parametrize("shape, axes", SUMMATION_PARAMETERS)
+@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
+def test_max(shape, axes, device):
+    _A = np.random.randn(*shape).astype(np.float32)
+    A = ndl.Tensor(nd.array(_A), device=device)
+    np.testing.assert_allclose(np.max(_A, axes), ndl.max(A, axes=axes).numpy(), atol=1e-5, rtol=1e-5)
+
+
+@pytest.mark.parametrize("shape, axes", SUMMATION_PARAMETERS)
+@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
+def test_max_backward(shape, axes, device):
+    _A = np.random.randn(*shape).astype(np.float32)
+    A = ndl.Tensor(nd.array(_A), device=device)
+    backward_check(ndl.max, A, axes=axes)
 
 BROADCAST_SHAPES = [((1, 1, 1), (3, 3, 3)),
     ((4, 1, 6), (4, 3, 6))]
@@ -289,27 +303,6 @@ def test_logsumexp_backward(shape, axes, device):
     A = ndl.Tensor(nd.array(_A), device=device)
     backward_check(ndl.logsumexp, A)
 
-def softmax(Z):
-    Z = np.exp(Z - Z.max(axis=-1, keepdims=True))
-    return Z / Z.sum(axis=-1, keepdims=True)
-
-@pytest.mark.parametrize("shape, axes", SUMMATION_PARAMETERS)
-@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
-def test_softmax(shape, axes, device):
-    _A = np.random.randn(*shape).astype(np.float32)
-    A = ndl.Tensor(nd.array(_A), device=device)
-    if axes is None:
-        t_axes = tuple(list(range(len(shape))))
-    else:
-        t_axes = axes
-    np.testing.assert_allclose(softmax(_A), ndl.softmax(A).numpy(), atol=1e-5, rtol=1e-5)
-
-@pytest.mark.parametrize("shape, axes", SUMMATION_PARAMETERS)
-@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
-def test_softmax_backward(shape, axes, device):
-    _A = np.random.randn(*shape).astype(np.float32)
-    A = ndl.Tensor(nd.array(_A), device=device)
-    backward_check(ndl.softmax, A)
 
 
 TEST_LOGSUMEXP_PARAMETERS = [((3, 2), 0), ((2, 1, 2, 3), 3)]

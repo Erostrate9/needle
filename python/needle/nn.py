@@ -165,6 +165,17 @@ class Sequential(Module):
         return x
         ### END YOUR SOLUTION
 
+class Softmax(Module):
+    def __init__(self, axis=-1):
+        self.axis=-1
+
+    def forward(self, Z: Tensor):
+        axes = list(Z.shape)
+        axes[self.axis] = 1
+        axes = tuple(axes)
+        Z = ops.exp(Z - Z.max(axes=(self.axis, )).reshape(axes).broadcast_to(Z.shape))
+        return Z / Z.sum(axes=(self.axis, )).reshape(axes).broadcast_to(Z.shape)
+
 
 class SoftmaxLoss(Module):
     def __init__(self, reduction='mean'):
@@ -909,6 +920,32 @@ class Transformer_test(Module):
         return self.layer_norm(Z + rhs)
 
 
+def masked_softmax(X, valid_lens):
+    # valid_lens: numpy array
+    def _sequence_mask(X: Tensor, valid_lens, value=0):
+        # X: n * d
+        maxlen = X.shape[-1]
+        mask = (np.arange(maxlen)[None, :] < valid_lens[:, None])
+        mask_mul = mask.astype(np.float32)
+        mask_add = (~mask).astype(np.float32) * value
+        mask_mul = Tensor(mask_mul, device=X.device, dtype=X.dtype, requires_grad=False)
+        mask_add = Tensor(mask_add, device=X.device, dtype=X.dtype, requires_grad=False)
+        return X * mask_mul + mask_add
+
+    if valid_lens is None:
+        return ops.softmax(X)
+    else:
+        shape = X.shape
+        if len(valid_lens.shape) == 1:
+            assert valid_lens.shape[0] == X.shape[0]
+            valid_lens = valid_lens.repeat(X.shape[1])
+        else:
+            valid_lens = valid_lens.reshape(-1)
+        # On the last axis, replace masked elements with a very large negative
+        # value, whose exponentiation outputs 0
+        X = _sequence_mask(X.reshape((prod(shape[:-1]), shape[-1])), valid_lens, value=-1e6)
+        return ops.softmax(X.reshape(shape))
+
 class DotProductAttention(Module):
     """Scaled dot product attention."""
 
@@ -920,37 +957,11 @@ class DotProductAttention(Module):
     # Shape of keys: (batch_size, no. of key-value pairs, d)
     # Shape of values: (batch_size, no. of key-value pairs, value dimension)
     # Shape of valid_lens: (batch_size,) or (batch_size, no. of queries)
-    def masked_softmax(self, X, valid_lens):
-        # valid_lens: numpy array
-        def _sequence_mask(X: Tensor, valid_lens, value=0):
-            # X: n * d
-            maxlen = X.shape[-1]
-            mask = (np.arange(maxlen)[None, :] < valid_lens[:, None])
-            mask_mul = mask.astype(np.float32)
-            mask_add = (~mask).astype(np.float32) * value
-            mask_mul = Tensor(mask_mul, device=X.device, dtype=X.dtype, requires_grad=False)
-            mask_add = Tensor(mask_add, device=X.device, dtype=X.dtype, requires_grad=False)
-            return X * mask_mul + mask_add
-
-        if valid_lens is None:
-            return ops.softmax(X)
-        else:
-            shape = X.shape
-            if len(valid_lens.shape) == 1:
-                assert valid_lens.shape[0] == X.shape[0]
-                valid_lens = valid_lens.repeat(X.shape[1])
-            else:
-                valid_lens = valid_lens.reshape(-1)
-            # On the last axis, replace masked elements with a very large negative
-            # value, whose exponentiation outputs 0
-            X = _sequence_mask(X.reshape((prod(shape[:-1]), shape[-1])), valid_lens, value=-1e6)
-            return ops.softmax(X.reshape(shape))
-
     def forward(self, queries, keys, values, valid_lens=None):
         d = queries.shape[-1]
         # Swap the last two dimensions of keys with keys.transpose(1, 2)
         scores = ops.bmm(queries, keys.transpose((1, 2))) / math.sqrt(d)
-        self.attention_weights = self.masked_softmax(scores, valid_lens)
+        self.attention_weights = masked_softmax(scores, valid_lens)
         return ops.bmm(self.dropout(self.attention_weights), values)
 
 
