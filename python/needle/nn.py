@@ -1063,16 +1063,15 @@ class TransformerEncoderBlock_test(Module):
 
 class PositionalEncoding(Module):
     """Positional encoding."""
-
     def                                 __init__(self, num_hiddens, dropout, max_len=1000):
         super().__init__()
         self.dropout = Dropout(dropout)
         # Create a long enough P
         self.P = np.zeros((1, max_len, num_hiddens))
-        X = np.arange(max_len).reshape(-1, 1) / np.power(
+        p = np.arange(max_len).reshape(-1, 1) / np.power(
             10000, np.arange(0, num_hiddens, 2) / num_hiddens)
-        self.P[:, :, 0::2] = np.sin(X)
-        self.P[:, :, 1::2] = np.cos(X)
+        self.P[:, :, 0::2] = np.sin(p)
+        self.P[:, :, 1::2] = np.cos(p)
 
     def forward(self, X):
         P = Tensor(self.P[:, :X.shape[1], :], device=X.device, dtype=X.dtype, requires_grad=False)
