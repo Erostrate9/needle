@@ -1,6 +1,6 @@
 import sys
 
-sys.path.append('./python')
+sys.path.append('../python')
 import needle as ndl
 import needle.nn as nn
 import math

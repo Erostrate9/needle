@@ -263,21 +263,21 @@ class BroadcastTo(TensorOp):
 
     def gradient(self, out_grad, node):
         ### BEGIN YOUR SOLUTION
-        input_shape = node.inputs[0].shape
-        extra_len = len(out_grad.shape) - len(input_shape)
-        index = tuple([i for i in reversed(range(len(out_grad.shape))) if (i < extra_len
-                                                                           or out_grad.shape[i] != input_shape[
-                                                                               i - extra_len])])
-        return summation(out_grad, axes=index).reshape(input_shape)
-        # in_shape = node.inputs[0].shape
-        # out_shape = out_grad.shape
-        # axes=[]
-        # for i in range(-1,-len(in_shape)-1,-1):
-        #   if(out_shape[i]!=in_shape[i]):
-        #     axes.insert(0,len(out_shape)+i)
-        # if len(out_shape)>len(in_shape):
-        #   axes=list(range(len(out_shape)-len(in_shape)))+axes
-        # return summation(out_grad, tuple(axes)).reshape(in_shape)
+        # input_shape = node.inputs[0].shape
+        # extra_len = len(out_grad.shape) - len(input_shape)
+        # index = tuple([i for i in reversed(range(len(out_grad.shape))) if (i < extra_len
+        #                                                                    or out_grad.shape[i] != input_shape[
+        #                                                                        i - extra_len])])
+        # return summation(out_grad, axes=index).reshape(input_shape)
+        in_shape = node.inputs[0].shape
+        out_shape = out_grad.shape
+        axes=[]
+        for i in range(-1,-len(in_shape)-1,-1):
+          if(out_shape[i]!=in_shape[i]):
+            axes.insert(0,len(out_shape)+i)
+        if len(out_shape)>len(in_shape):
+          axes=list(range(len(out_shape)-len(in_shape)))+axes
+        return summation(out_grad, tuple(axes)).reshape(in_shape)
         ### END YOUR SOLUTION
 
 

@@ -238,6 +238,8 @@ def evaluate_ptb(model, data, seq_len=40, loss_fn=nn.SoftmaxLoss,
     ### END YOUR SOLUTION
 
 
+
+
 if __name__ == "__main__":
     ### For testing purposes
     device = ndl.cpu()
