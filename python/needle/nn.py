@@ -862,6 +862,7 @@ class MultiheadAttention_test(Module):
         self.W_out = Parameter(W_out, device=device, dtype=dtype,
                                requires_grad=True)
         self.attention_weights = None
+        self.softmax = Softmax()
 
     def forward(self, X: Tensor) -> Tensor:
         def get_tensors(ttuple, start, end):
@@ -888,7 +889,7 @@ class MultiheadAttention_test(Module):
         # B x heads x T x d/heads
         # K@Q.T: B x heads x T x T
         # mask: T x T
-        attn = ops.softmax(ops.batch_matmul(K, Q.transpose()) / ((d // self.heads) ** 0.5) + self.mask.broadcast_to(
+        attn = self.softmax(ops.batch_matmul(K, Q.transpose()) / ((d // self.heads) ** 0.5) + self.mask.broadcast_to(
             (B, self.heads, T, T)))
         self.attention_weights = attn
         attn_output = (ops.batch_matmul(attn, V).transpose((1, 2)).reshape((B * T, d)) @ self.W_out).reshape(
@@ -931,9 +932,9 @@ def masked_softmax(X, valid_lens):
         mask_mul = Tensor(mask_mul, device=X.device, dtype=X.dtype, requires_grad=False)
         mask_add = Tensor(mask_add, device=X.device, dtype=X.dtype, requires_grad=False)
         return X * mask_mul + mask_add
-
+    softmax = Softmax()
     if valid_lens is None:
-        return ops.softmax(X)
+        return softmax(X)
     else:
         shape = X.shape
         if len(valid_lens.shape) == 1:
@@ -944,7 +945,7 @@ def masked_softmax(X, valid_lens):
         # On the last axis, replace masked elements with a very large negative
         # value, whose exponentiation outputs 0
         X = _sequence_mask(X.reshape((prod(shape[:-1]), shape[-1])), valid_lens, value=-1e6)
-        return ops.softmax(X.reshape(shape))
+        return softmax(X.reshape(shape))
 
 class DotProductAttention(Module):
     """Scaled dot product attention."""
