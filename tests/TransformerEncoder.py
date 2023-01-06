@@ -234,7 +234,7 @@ device = ndl.cuda()
 encoder = TransformerEncoder(
     200, 24, 24, 24, 24, [100, 24], 24, 48, 8, num_layers, dropout, use_bias=use_bias)
 encoder_ = ndl.nn.TransformerEncoder(
-    200, 24, 24, 24, 24, 24, 48, 8, num_layers, dropout, use_bias=use_bias, device=device, dtype="float32")
+    200, 24, 24, 24, 24, [100, 24], 24, 48, 8, num_layers, dropout, use_bias=use_bias, device=device, dtype="float32")
 
 
 valid_lens = torch.tensor([3, 2])

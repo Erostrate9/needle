@@ -312,8 +312,9 @@ class LayerNorm1d(Module):
 
 
 class LayerNorm(Module):
-    def __init__(self, eps=1e-5, unbiased=True):
+    def __init__(self, normalized_shape, eps=1e-5, unbiased=False):
         super().__init__()
+        self.normalized_shape = [normalized_shape,] if isinstance(normalized_shape, int) else normalized_shape
         self.eps = eps
         self.unbiased = unbiased
 
@@ -322,13 +323,13 @@ class LayerNorm(Module):
         # Z: (n1 x n2 x ... x nd)
         # e: (n1 x n2 x ... x nd)
         # var:(n1 x n2 x ... x nd)
-        axis = len(Z.shape) - 1
-        d = Z.shape[-1]
+        axis = tuple(range(-len(self.normalized_shape), 0))
+        d = prod(Z.shape[-len(self.normalized_shape):])
+        shape = tuple(list(Z.shape[:-len(self.normalized_shape)]) + [1]*len(self.normalized_shape))
         # mean
-        e = Z.sum(axes=(axis,)).reshape(Z.shape[:-1] + (1,)) / d
+        e = Z.sum(axes=axis).reshape(shape) / d
         # var
-        var = (((Z - e.broadcast_to(Z.shape)) ** 2).sum(axes=(axis,)) / (d-1 if self.unbiased else d)).reshape(Z.shape[:-1] + (1,))
-
+        var = (((Z - e.broadcast_to(Z.shape)) ** 2).sum(axes=axis) / (d-1 if self.unbiased else d)).reshape(shape)
         a = (Z - e.broadcast_to(Z.shape))
         b = ((var.broadcast_to(Z.shape) + self.eps) ** 0.5)
         return a / b
@@ -838,87 +839,80 @@ class EncoderDecoder(Module):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
-        # debug
-        self.enc_outputs = None
-        self.dec_state = None
 
     def forward(self, enc_X, dec_X, *args):
         enc_outputs = self.encoder(enc_X, *args)
         dec_state = self.decoder.init_state(enc_outputs, *args)
-
-        # debug
-        self.enc_outputs = enc_outputs
-        self.dec_state = dec_state
         return self.decoder(dec_X, dec_state)
 
 
-class MultiheadAttention_test(Module):
-    def __init__(self, mask, heads, W_KQV, W_out, device=None, dtype="float32"):
-        super().__init__()
-        self.mask = mask
-        self.heads = heads
-        self.W_KQV = Parameter(W_KQV, device=device, dtype=dtype,
-                               requires_grad=True)
-        self.W_out = Parameter(W_out, device=device, dtype=dtype,
-                               requires_grad=True)
-        self.attention_weights = None
-        self.softmax = Softmax()
+# class MultiheadAttention_test(Module):
+#     def __init__(self, mask, heads, W_KQV, W_out, device=None, dtype="float32"):
+#         super().__init__()
+#         self.mask = mask
+#         self.heads = heads
+#         self.W_KQV = Parameter(W_KQV, device=device, dtype=dtype,
+#                                requires_grad=True)
+#         self.W_out = Parameter(W_out, device=device, dtype=dtype,
+#                                requires_grad=True)
+#         self.attention_weights = None
+#         self.softmax = Softmax()
+#
+#     def forward(self, X: Tensor) -> Tensor:
+#         def get_tensors(ttuple, start, end):
+#             res = []
+#             for i in range(start, end):
+#                 if i >= len(ttuple):
+#                     break
+#                 res.append(ttuple[i])
+#             return ops.MakeTensorTuple()(*res)
+#
+#         B, T, d = X.shape
+#         res = (X.reshape((B * T, d)) @ self.W_KQV).reshape((B, T, self.W_KQV.shape[-1]))
+#
+#         KQV = ops.split(res, len(X.shape) - 1)
+#         n = self.W_KQV.shape[-1] // 3
+#
+#         K = ops.stack(get_tensors(KQV, 0, n), len(X.shape) - 1).reshape((B, T, self.heads, d // self.heads)).transpose(
+#             (1, 2))
+#         Q = ops.stack(get_tensors(KQV, n, n * 2), len(X.shape) - 1).reshape(
+#             (B, T, self.heads, d // self.heads)).transpose((1, 2))
+#         V = ops.stack(get_tensors(KQV, n * 2, n * 3), len(X.shape) - 1).reshape(
+#             (B, T, self.heads, d // self.heads)).transpose((1, 2))
+#         # B x T x d =>
+#         # B x heads x T x d/heads
+#         # K@Q.T: B x heads x T x T
+#         # mask: T x T
+#         attn = self.softmax(ops.batch_matmul(K, Q.transpose()) / ((d // self.heads) ** 0.5) + self.mask.broadcast_to(
+#             (B, self.heads, T, T)))
+#         self.attention_weights = attn
+#         attn_output = (ops.batch_matmul(attn, V).transpose((1, 2)).reshape((B * T, d)) @ self.W_out).reshape(
+#             (B, T, self.W_out.shape[-1]))
+#         return attn_output, attn
 
-    def forward(self, X: Tensor) -> Tensor:
-        def get_tensors(ttuple, start, end):
-            res = []
-            for i in range(start, end):
-                if i >= len(ttuple):
-                    break
-                res.append(ttuple[i])
-            return ops.MakeTensorTuple()(*res)
 
-        B, T, d = X.shape
-        res = (X.reshape((B * T, d)) @ self.W_KQV).reshape((B, T, self.W_KQV.shape[-1]))
+# class Transformer_test(Module):
+#     def __init__(self, mask, heads, W_KQV, W_out, W_ff1, W_ff2, eps, device=None, dtype="float32"):
+#         super().__init__()
+#         self.mask = mask
+#         self.heads = heads
+#         self.W_KQV = Parameter(W_KQV, device=device, dtype=dtype,
+#                                requires_grad=True)
+#         self.W_out = Parameter(W_out, device=device, dtype=dtype,
+#                                requires_grad=True)
+#         self.W_ff1 = Parameter(W_ff1, device=device, dtype=dtype,
+#                                requires_grad=True)
+#         self.W_ff2 = Parameter(W_ff2, device=device, dtype=dtype,
+#                                requires_grad=True)
+#         self.layer_norm = LayerNorm(eps)
+#         self.multihead_attention = MultiheadAttention_test(mask, heads, W_KQV, W_out, device=device, dtype=dtype)
+#         self.relu = ReLU()
 
-        KQV = ops.split(res, len(X.shape) - 1)
-        n = self.W_KQV.shape[-1] // 3
-
-        K = ops.stack(get_tensors(KQV, 0, n), len(X.shape) - 1).reshape((B, T, self.heads, d // self.heads)).transpose(
-            (1, 2))
-        Q = ops.stack(get_tensors(KQV, n, n * 2), len(X.shape) - 1).reshape(
-            (B, T, self.heads, d // self.heads)).transpose((1, 2))
-        V = ops.stack(get_tensors(KQV, n * 2, n * 3), len(X.shape) - 1).reshape(
-            (B, T, self.heads, d // self.heads)).transpose((1, 2))
-        # B x T x d =>
-        # B x heads x T x d/heads
-        # K@Q.T: B x heads x T x T
-        # mask: T x T
-        attn = self.softmax(ops.batch_matmul(K, Q.transpose()) / ((d // self.heads) ** 0.5) + self.mask.broadcast_to(
-            (B, self.heads, T, T)))
-        self.attention_weights = attn
-        attn_output = (ops.batch_matmul(attn, V).transpose((1, 2)).reshape((B * T, d)) @ self.W_out).reshape(
-            (B, T, self.W_out.shape[-1]))
-        return attn_output, attn
-
-
-class Transformer_test(Module):
-    def __init__(self, mask, heads, W_KQV, W_out, W_ff1, W_ff2, eps, device=None, dtype="float32"):
-        super().__init__()
-        self.mask = mask
-        self.heads = heads
-        self.W_KQV = Parameter(W_KQV, device=device, dtype=dtype,
-                               requires_grad=True)
-        self.W_out = Parameter(W_out, device=device, dtype=dtype,
-                               requires_grad=True)
-        self.W_ff1 = Parameter(W_ff1, device=device, dtype=dtype,
-                               requires_grad=True)
-        self.W_ff2 = Parameter(W_ff2, device=device, dtype=dtype,
-                               requires_grad=True)
-        self.layer_norm = LayerNorm(eps)
-        self.multihead_attention = MultiheadAttention_test(mask, heads, W_KQV, W_out, device=device, dtype=dtype)
-        self.relu = ReLU()
-
-    def forward(self, X: Tensor) -> Tensor:
-        Z = self.layer_norm(X + self.multihead_attention(X)[0])
-        B, T, d = Z.shape
-        rhs = (self.relu(Z.reshape((B * T, d)) @ self.W_ff1) @ self.W_ff2).reshape((B, T, d))
-        return self.layer_norm(Z + rhs)
+    # def forward(self, X: Tensor) -> Tensor:
+    #     Z = self.layer_norm(X + self.multihead_attention(X)[0])
+    #     B, T, d = Z.shape
+    #     rhs = (self.relu(Z.reshape((B * T, d)) @ self.W_ff1) @ self.W_ff2).reshape((B, T, d))
+    #     return self.layer_norm(Z + rhs)
 
 
 def masked_softmax(X, valid_lens):
@@ -1034,36 +1028,36 @@ class PositionWiseFFN(Module):
 
 
 class AddNorm(Module):
-    def __init__(self, dropout=0.5, eps=1e-5):
+    def __init__(self, normalized_shape, dropout=0.5, eps=1e-5):
         super().__init__()
         self.dropout = Dropout(dropout)
-        self.ln = LayerNorm(eps=eps)
+        self.ln = LayerNorm(normalized_shape, eps=eps)
 
     def forward(self, X: Tensor, Y: Tensor) -> Tensor:
         return self.ln(self.dropout(Y) + X)
 
 
-class TransformerEncoderBlock_test(Module):
-    """Transformer Encoder Block"""
-
-    def __init__(self, mask, num_heads, W_KQV, W_out,
-                 ffn_num_input, ffn_num_hiddens, num_hiddens,
-                 eps, dropout, device=None, dtype="float32"):
-        super().__init__()
-        self.attention = MultiheadAttention_test(mask, num_heads, W_KQV, W_out, device=device, dtype=dtype)
-        self.addnorm1 = AddNorm(eps, dropout)
-        self.ffn = PositionWiseFFN(
-            ffn_num_input, ffn_num_hiddens, num_hiddens, device=device, dtype=dtype)
-        self.addnorm2 = AddNorm(eps, dropout)
-
-    def forward(self, X):
-        Y = self.addnorm1(X, self.attention(X)[0])
-        return self.addnorm2(Y, self.ffn(Y))
+# class TransformerEncoderBlock_test(Module):
+#     """Transformer Encoder Block"""
+#
+#     def __init__(self, mask, num_heads, W_KQV, W_out,
+#                  ffn_num_input, ffn_num_hiddens, num_hiddens,
+#                  eps, dropout, device=None, dtype="float32"):
+#         super().__init__()
+#         self.attention = MultiheadAttention_test(mask, num_heads, W_KQV, W_out, device=device, dtype=dtype)
+#         self.addnorm1 = AddNorm(eps, dropout)
+#         self.ffn = PositionWiseFFN(
+#             ffn_num_input, ffn_num_hiddens, num_hiddens, device=device, dtype=dtype)
+#         self.addnorm2 = AddNorm(eps, dropout)
+#
+#     def forward(self, X):
+#         Y = self.addnorm1(X, self.attention(X)[0])
+#         return self.addnorm2(Y, self.ffn(Y))
 
 
 class PositionalEncoding(Module):
     """Positional encoding."""
-    def                                 __init__(self, num_hiddens, dropout, max_len=1000):
+    def __init__(self, num_hiddens, dropout, max_len=1000):
         super().__init__()
         self.dropout = Dropout(dropout)
         # Create a long enough P
@@ -1079,72 +1073,52 @@ class PositionalEncoding(Module):
         return self.dropout(X)
 
 
-class TransformerEncoder_test(Encoder):
-    """Transformer Encoder"""
+# class TransformerEncoder_test(Encoder):
+#     """Transformer Encoder"""
+#
+#     def __init__(self, vocab_size, num_hiddens, num_blks, mask, num_heads, W_KQV, W_out,
+#                  ffn_num_input, ffn_num_hiddens,
+#                  eps, dropout, device=None, dtype="float32"):
+#         super().__init__()
+#         self.num_hiddens = num_hiddens
+#         self.embedding = Embedding(vocab_size, num_hiddens, device=device, dtype=dtype)
+#         self.pos_encoding = PositionalEncoding(num_hiddens, dropout)
+#         self.blks = Sequential()
+#         for i in range(num_blks):
+#             self.blks.add_module(
+#                 TransformerEncoderBlock_test(mask, num_heads, W_KQV, W_out,
+#                                              ffn_num_input, ffn_num_hiddens, num_hiddens,
+#                                              eps, dropout, device=device, dtype=dtype))
 
-    def __init__(self, vocab_size, num_hiddens, num_blks, mask, num_heads, W_KQV, W_out,
-                 ffn_num_input, ffn_num_hiddens,
-                 eps, dropout, device=None, dtype="float32"):
-        super().__init__()
-        self.num_hiddens = num_hiddens
-        self.embedding = Embedding(vocab_size, num_hiddens, device=device, dtype=dtype)
-        self.pos_encoding = PositionalEncoding(num_hiddens, dropout)
-        self.blks = Sequential()
-        for i in range(num_blks):
-            self.blks.add_module(
-                TransformerEncoderBlock_test(mask, num_heads, W_KQV, W_out,
-                                             ffn_num_input, ffn_num_hiddens, num_hiddens,
-                                             eps, dropout, device=device, dtype=dtype))
-
-    def forward(self, X, valid_lens, *args):
-        # Since positional encoding values are between -1 and 1, the embedding
-        # values are multiplied by the square root of the embedding dimension
-        # to rescale before they are summed up
-        X = self.pos_encoding(self.embedding(X) * math.sqrt(self.num_hiddens))
-        self.attention_weights = [None] * len(self.blks)
-        for i, blk in enumerate(self.blks):
-            X = blk(X, valid_lens)
-            self.attention_weights[
-                i] = blk.attention.attention_weights
-        return X
+    # def forward(self, X, valid_lens, *args):
+    #     # Since positional encoding values are between -1 and 1, the embedding
+    #     # values are multiplied by the square root of the embedding dimension
+    #     # to rescale before they are summed up
+    #     X = self.pos_encoding(self.embedding(X) * math.sqrt(self.num_hiddens))
+    #     self.attention_weights = [None] * len(self.blks)
+    #     for i, blk in enumerate(self.blks):
+    #         X = blk(X, valid_lens)
+    #         self.attention_weights[
+    #             i] = blk.attention.attention_weights
+    #     return X
 
 
 class TransformerEncoderBlock(Module):
     """Transformer Encoder Block"""
 
     def __init__(self, key_size, query_size, value_size, num_hiddens,
-                 ffn_num_input, ffn_num_hiddens, num_heads,
+                 norm_shape, ffn_num_input, ffn_num_hiddens, num_heads,
                  dropout, use_bias=False, device=None, dtype="float32"):
         super().__init__()
         self.attention = MultiHeadAttention(
             key_size, query_size, value_size, num_hiddens, num_heads, dropout,
             bias=use_bias, device=device, dtype=dtype)
-        self.addnorm1 = AddNorm(dropout)
+        self.addnorm1 = AddNorm(norm_shape, dropout)
         self.ffn = PositionWiseFFN(
             ffn_num_input, ffn_num_hiddens, num_hiddens, device=device, dtype=dtype)
-        self.addnorm2 = AddNorm(dropout)
-        ### debug
-        # self.X = None
-        # self.attn = None
-        # self.Y = None
-        # self.res = None
-        # self.attn = None
-        # self.ffnY = None
+        self.addnorm2 = AddNorm(norm_shape, dropout)
 
     def forward(self, X, valid_lens):
-        #### debug
-        # self.X = X.numpy()
-        # attn = self.attention(X, X, X, valid_lens)
-        # self.attn = attn.numpy()
-        # Y = self.addnorm1(X, attn)
-        # self.Y = Y.numpy()
-        # ffnY = self.ffn(Y)
-        # self.ffnY = ffnY.numpy()
-        # res = self.addnorm2(Y, ffnY)
-        # self.res = res.numpy()
-        # return res
-        ####
-
         Y = self.addnorm1(X, self.attention(X, X, X, valid_lens))
         return self.addnorm2(Y, self.ffn(Y))
 
@@ -1152,7 +1126,7 @@ class TransformerEncoderBlock(Module):
 class TransformerEncoder(Encoder):
     """Transformer Encoder"""
     def __init__(self, vocab_size, key_size, query_size, value_size,
-                 num_hiddens, ffn_num_input, ffn_num_hiddens,
+                 num_hiddens, norm_shape, ffn_num_input, ffn_num_hiddens,
                  num_heads, num_layers=1, dropout=0, use_bias=False, device=None, dtype="float32"):
         super().__init__()
         self.num_hiddens = num_hiddens
@@ -1162,11 +1136,9 @@ class TransformerEncoder(Encoder):
         for i in range(num_layers):
             self.blks.add_module(
                 TransformerEncoderBlock(key_size, query_size, value_size, num_hiddens,
-                              ffn_num_input, ffn_num_hiddens,
+                             norm_shape, ffn_num_input, ffn_num_hiddens,
                              num_heads, dropout, use_bias, device=device, dtype=dtype))
         self.attention_weights = [None] * len(self.blks.modules)
-        self.X = []
-        self.y = []
 
     def forward(self, X, valid_lens):
         # Since positional encoding values are between -1 and 1, the embedding
@@ -1174,13 +1146,8 @@ class TransformerEncoder(Encoder):
         # to rescale before they are summed up
 
         X = self.pos_encoding(self.embedding(X) * math.sqrt(self.num_hiddens))
-        self.X.append(X)
-        # y = self.blks(X, valid_lens)
         for i, blk in enumerate(self.blks.modules):
-            # self.X.append(X.numpy())
             X = blk(X, valid_lens)
-            self.y.append(X.numpy())
-
             self.attention_weights[
                 i] = blk.attention.attention.attention_weights
         return X
@@ -1189,31 +1156,21 @@ class TransformerEncoder(Encoder):
 class TransformerDecoderBlock(Module):
     # The i-th block in the Transformer decoder
     def __init__(self, key_size, query_size, value_size, num_hiddens,
-                ffn_num_input, ffn_num_hiddens, num_heads,
+                 norm_shape, ffn_num_input, ffn_num_hiddens, num_heads,
                  dropout, i, use_bias=True, device=None, dtype="float32"):
         super().__init__()
         self.i = i
         self.attention1 = MultiHeadAttention(
             key_size, query_size, value_size, num_hiddens, num_heads, dropout,
             bias=use_bias, device=device, dtype=dtype)
-        self.addnorm1 = AddNorm(dropout)
+        self.addnorm1 = AddNorm(norm_shape, dropout)
         self.attention2 = MultiHeadAttention(
             key_size, query_size, value_size, num_hiddens, num_heads, dropout,
             bias=use_bias, device=device, dtype=dtype)
-        self.addnorm2 = AddNorm(dropout)
+        self.addnorm2 = AddNorm(norm_shape, dropout)
         self.ffn = PositionWiseFFN(
             ffn_num_input, ffn_num_hiddens, num_hiddens, device=device, dtype=dtype)
-        self.addnorm3 = AddNorm(dropout)
-        # debug
-        self.X = None
-        self.enc_outputs = None
-        self.enc_valid_lens = None
-        self.X2 = None
-        self.Y = None
-        self.Y2 = None
-        self.Z = None
-        self.key_values = None
-        self.dec_valid_lens = None
+        self.addnorm3 = AddNorm(norm_shape, dropout)
 
     def forward(self, X, state):
             enc_outputs, enc_valid_lens = state[0], state[1]
@@ -1241,21 +1198,11 @@ class TransformerDecoderBlock(Module):
             # (batch_size, num_steps, num_hiddens)
             Y2 = self.attention2(Y, enc_outputs, enc_outputs, enc_valid_lens)
             Z = self.addnorm2(Y, Y2)
-            # debug
-            self.X = X
-            self.enc_outputs = enc_outputs
-            self.enc_valid_lens = enc_valid_lens
-            self.key_values = key_values
-            self.dec_valid_lens = dec_valid_lens
-            self.X2 = X2
-            self.Y = Y
-            self.Y2 = Y2
-            self.Z = Z
             return self.addnorm3(Z, self.ffn(Z)), state
 
 class TransformerDecoder(AttentionDecoder):
     def __init__(self, vocab_size, key_size, query_size, value_size,
-                 num_hiddens, ffn_num_input, ffn_num_hiddens,
+                 num_hiddens, norm_shape, ffn_num_input, ffn_num_hiddens,
                  num_heads, num_layers, dropout, use_bias=True, device=None, dtype="float32"):
         super().__init__()
         self.num_hiddens = num_hiddens
@@ -1267,12 +1214,9 @@ class TransformerDecoder(AttentionDecoder):
         for i in range(num_layers):
             self.blks.add_module(
                 TransformerDecoderBlock(key_size, query_size, value_size, num_hiddens,
-                                        ffn_num_input, ffn_num_hiddens,
+                                        norm_shape, ffn_num_input, ffn_num_hiddens,
                                         num_heads, dropout, i, use_bias, device=device, dtype=dtype))
         self.dense = Linear(num_hiddens, vocab_size, bias=True, device=device, dtype=dtype)
-        # debug
-        self.X = []
-        self.state = []
 
     def init_state(self, enc_outputs, enc_valid_lens, *args):
         return [enc_outputs, enc_valid_lens, [None] * self.num_layers]
@@ -1280,19 +1224,12 @@ class TransformerDecoder(AttentionDecoder):
     def forward(self, X, state):
         X = self.pos_encoding(self.embedding(X) * math.sqrt(self.num_hiddens))
         self._attention_weights = [[None] * len(self.blks.modules) for _ in range (2)]
-        ##
-        self.X.append(X)
-        ##
         for i, blk in enumerate(self.blks.modules):
             X, state = blk(X, state)
-            ##
-            self.X.append(X)
-            self.state.append(state)
-            ##
-            # 解码器自注意力权重
+            # Decoder self-attention weights
             self._attention_weights[0][
                 i] = blk.attention1.attention.attention_weights
-            # “编码器－解码器”自注意力权重
+            # Encoder-decoder attention weights
             self._attention_weights[1][
                 i] = blk.attention2.attention.attention_weights
         return self.dense(X), state
