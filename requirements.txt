@@ -1,0 +1,6 @@
+d2l==0.17.6
+pybind11
+torch
+numpy
+matplotlib
+matplotlib_inline
