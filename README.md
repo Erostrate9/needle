@@ -18,4 +18,3 @@ To explore project details, go to `Final project.ipynb`. To run it, you can foll
 ## Authours
 * Yuxuan Sun: <yuxuan_eric_sun@outlook.com>
 * Sergey: <seriy.karp2@gmail.com>
-* Haitao Gao: <haitaogao423@gmail.com>
